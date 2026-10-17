@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<main class="center-page">
+  <div class="blueprint signin"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div class="stat-kicker">loopk · LoopKeeper</div>
+    <h2 style="margin:0">Sign in</h2>
+    <p class="text-muted" style="margin:0">Use the Google account that was given access to this site.</p>
+    <p class="error" id="error" hidden></p>
+    <a class="btn btn-primary blueprint" href="/auth/google" id="google"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><path d="m10 17 5-5-5-5"></path><path d="M15 12H3"></path></svg>
+      Sign in with Google
+    </a>
+  </div>
+</main>
+<script>
+  const messages = {
+    denied: 'This Google account has no access. Ask an administrator to add it.',
+    state: 'The sign-in attempt expired. Please try again.',
+    unverified: 'This Google account has no verified email address.',
+    access_denied: 'Sign-in was cancelled.',
+  };
+  const err = new URLSearchParams(location.search).get('error');
+  if (err) {
+    const el = document.getElementById('error');
+    el.textContent = messages[err] || 'Sign-in failed (' + err + ').';
+    el.hidden = false;
+  }
+  fetch('/api/session').then((r) => r.json()).then((s) => {
+    if (s.user) location.href = '/';
+    else if (s.googleConfigured === false) {
+      const el = document.getElementById('error');
+      el.textContent = 'Google sign-in is not configured on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).';
+      el.hidden = false;
+    }
+  }).catch(() => {});
+</script>
+</body>
+</html>

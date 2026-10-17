@@ -1,0 +1,27 @@
+// Configuration from the environment: only what differs between deployments.
+
+function emails (value) {
+  return (value || '').split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+export function loadConfig (env = process.env) {
+  const port = parseInt(env.PORT, 10) || 1337;
+  const baseUrl = (env.BASE_URL || `http://localhost:${port}`).replace(/\/$/, '');
+  return {
+    port,
+    baseUrl,
+    databaseUrl: env.DATABASE_URL || 'postgres://localhost/loopkdev',
+    google: {
+      clientId: env.GOOGLE_CLIENT_ID || '',
+      clientSecret: env.GOOGLE_CLIENT_SECRET || '',
+    },
+    // Google accounts that may sign in; admins can also manage access tokens.
+    allowedEmails: emails(env.ALLOWED_EMAILS),
+    adminEmails: emails(env.ADMIN_EMAILS),
+    secureCookies: baseUrl.startsWith('https://'),
+    // Local development only: the browser is signed in as an admin without Google.
+    authDisabled: ['1', 'true'].includes(String(env.AUTH_DISABLED).toLowerCase()),
+    // Follow another Nightscout server (its URL and a read access token there).
+    follow: env.FOLLOW_URL ? { url: env.FOLLOW_URL, token: env.FOLLOW_TOKEN || '' } : null,
+  };
+}

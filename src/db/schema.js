@@ -1,0 +1,221 @@
+// Mapping between APIv3 document fields and table columns (see migrations/).
+//
+// Each field is [documentPath, column, type]. Types:
+//   text, double, bigint, int, bool  scalar columns
+//   ts                               ISO timestamp string <-> timestamptz
+//   textArray                        list of strings <-> text[]
+//   json                             jsonb, for parts without a fixed structure
+//   jsonString                       a JSON document sent as a string <-> jsonb
+// A value whose type does not fit its column is kept unchanged in `extra`, as
+// are fields without a column, so documents round-trip.
+
+const COMMON = [
+  ['identifier', 'identifier', 'text'],
+  ['date', 'date', 'bigint'],
+  ['utcOffset', 'utc_offset', 'int'],
+  ['created_at', 'created_at', 'ts'],
+  ['app', 'app', 'text'],
+  ['device', 'device', 'text'],
+  ['subject', 'subject', 'text'],
+  ['modifiedBy', 'modified_by', 'text'],
+  ['srvCreated', 'srv_created', 'bigint'],
+  ['srvModified', 'srv_modified', 'bigint'],
+  ['isValid', 'is_valid', 'bool'],
+  ['isReadOnly', 'is_read_only', 'bool'],
+];
+
+function determineBasal (source) {
+  const p = `openaps.${source}.`;
+  const c = `${source}_`;
+  return [
+    [p + 'timestamp', c + 'timestamp', 'text'],
+    [p + 'deliverAt', c + 'deliver_at', 'text'],
+    [p + 'bg', c + 'bg', 'double'],
+    [p + 'tick', c + 'tick', 'text'],
+    [p + 'eventualBG', c + 'eventual_bg', 'double'],
+    [p + 'targetBG', c + 'target_bg', 'double'],
+    [p + 'insulinReq', c + 'insulin_req', 'double'],
+    [p + 'carbsReq', c + 'carbs_req', 'double'],
+    [p + 'COB', c + 'cob', 'double'],
+    [p + 'IOB', c + 'iob', 'double'],
+    [p + 'rate', c + 'rate', 'double'],
+    [p + 'duration', c + 'duration', 'double'],
+    [p + 'units', c + 'units', 'double'],
+    [p + 'sensitivityRatio', c + 'sensitivity_ratio', 'double'],
+    [p + 'variable_sens', c + 'variable_sens', 'double'],
+    [p + 'temp', c + 'temp', 'text'],
+    [p + 'reason', c + 'reason', 'text'],
+    [p + 'algorithm', c + 'algorithm', 'text'],
+    [p + 'runningDynamicIsf', c + 'running_dynamic_isf', 'bool'],
+    [p + 'isfMgdlForCarbs', c + 'isf_mgdl_for_carbs', 'double'],
+    [p + 'carbsReqWithin', c + 'carbs_req_within', 'double'],
+    [p + 'consoleLog', c + 'console_log', 'textArray'],
+    [p + 'consoleError', c + 'console_error', 'textArray'],
+  ];
+}
+
+export const SCHEMAS = {
+  entries: [
+    ...COMMON,
+    ['type', 'type', 'text'],
+    ['dateString', 'date_string', 'text'],
+    ['sgv', 'sgv', 'double'],
+    ['mbg', 'mbg', 'double'],
+    ['direction', 'direction', 'text'],
+    ['noise', 'noise', 'double'],
+    ['filtered', 'filtered', 'double'],
+    ['unfiltered', 'unfiltered', 'double'],
+    ['rssi', 'rssi', 'double'],
+    ['delta', 'delta', 'double'],
+    ['units', 'units', 'text'],
+    ['slope', 'slope', 'double'],
+    ['intercept', 'intercept', 'double'],
+    ['scale', 'scale', 'double'],
+  ],
+
+  treatments: [
+    ...COMMON,
+    ['eventType', 'event_type', 'text'],
+    ['mills', 'mills', 'bigint'],
+    ['timestamp', 'timestamp', 'bigint'],
+    ['glucose', 'glucose', 'double'],
+    ['glucoseType', 'glucose_type', 'text'],
+    ['units', 'units', 'text'],
+    ['carbs', 'carbs', 'double'],
+    ['protein', 'protein', 'double'],
+    ['fat', 'fat', 'double'],
+    ['insulin', 'insulin', 'double'],
+    ['enteredinsulin', 'entered_insulin', 'double'],
+    ['type', 'type', 'text'],
+    ['isSMB', 'is_smb', 'bool'],
+    ['isBasalInsulin', 'is_basal_insulin', 'bool'],
+    ['preBolus', 'pre_bolus', 'double'],
+    ['splitNow', 'split_now', 'double'],
+    ['splitExt', 'split_ext', 'double'],
+    ['duration', 'duration', 'double'],
+    ['durationInMilliseconds', 'duration_in_milliseconds', 'bigint'],
+    ['percent', 'percent', 'double'],
+    ['absolute', 'absolute', 'double'],
+    ['rate', 'rate', 'double'],
+    ['relative', 'relative', 'double'],
+    ['isEmulatingTempBasal', 'is_emulating_temp_basal', 'bool'],
+    ['targetTop', 'target_top', 'double'],
+    ['targetBottom', 'target_bottom', 'double'],
+    ['profile', 'profile', 'text'],
+    ['percentage', 'percentage', 'double'],
+    ['timeshift', 'timeshift', 'bigint'],
+    ['originalProfileName', 'original_profile_name', 'text'],
+    ['originalCustomizedName', 'original_customized_name', 'text'],
+    ['originalTimeshift', 'original_timeshift', 'bigint'],
+    ['originalPercentage', 'original_percentage', 'double'],
+    ['originalDuration', 'original_duration', 'bigint'],
+    ['originalEnd', 'original_end', 'bigint'],
+    ['mode', 'mode', 'text'],
+    ['autoForced', 'auto_forced', 'bool'],
+    ['reasons', 'reasons', 'text'],
+    ['reason', 'reason', 'text'],
+    ['location', 'location', 'text'],
+    ['arrow', 'arrow', 'text'],
+    ['notes', 'notes', 'text'],
+    ['enteredBy', 'entered_by', 'text'],
+    ['isAnnouncement', 'is_announcement', 'bool'],
+    ['endId', 'end_id', 'bigint'],
+    ['pumpId', 'pump_id', 'bigint'],
+    ['pumpType', 'pump_type', 'text'],
+    ['pumpSerial', 'pump_serial', 'text'],
+    ['bolusCalculatorResult', 'bolus_calculator_result', 'jsonString'],
+    ['extendedEmulated', 'extended_emulated', 'json'],
+    ['originalExtendedAmount', 'original_extended_amount', 'double'],
+    ['profilePlugin', 'profile_plugin', 'text'],
+    ['icfg.insulinLabel', 'insulin_label', 'text'],
+    ['icfg.insulinEndTime', 'insulin_end_time', 'bigint'],
+    ['icfg.insulinPeakTime', 'insulin_peak_time', 'bigint'],
+    ['icfg.concentration', 'insulin_concentration', 'double'],
+    ['boluscalc', 'boluscalc', 'json'],
+  ],
+
+  devicestatus: [
+    ...COMMON,
+    ['uploaderBattery', 'uploader_battery', 'int'],
+    ['isCharging', 'is_charging', 'bool'],
+    ['uploader.battery', 'uploader_battery_percent', 'int'],
+    ['pump.clock', 'pump_clock', 'text'],
+    ['pump.reservoir', 'pump_reservoir', 'double'],
+    ['pump.reservoir_display_override', 'pump_reservoir_display_override', 'text'],
+    ['pump.battery.percent', 'pump_battery_percent', 'int'],
+    ['pump.battery.voltage', 'pump_battery_voltage', 'double'],
+    ['pump.status.status', 'pump_status', 'text'],
+    ['pump.status.timestamp', 'pump_status_timestamp', 'text'],
+    ['pump.extended', 'pump_extended', 'json'],
+    ['openaps.iob.iob', 'iob_iob', 'double'],
+    ['openaps.iob.basaliob', 'iob_basaliob', 'double'],
+    ['openaps.iob.bolusiob', 'iob_bolusiob', 'double'],
+    ['openaps.iob.activity', 'iob_activity', 'double'],
+    ['openaps.iob.time', 'iob_time', 'text'],
+    ...determineBasal('suggested'),
+    ...determineBasal('enacted'),
+    ['openaps.enacted.received', 'enacted_received', 'bool'],
+    ['openaps.enacted.smb', 'enacted_smb', 'double'],
+    ['openaps.enacted.requested.duration', 'enacted_requested_duration', 'double'],
+    ['openaps.enacted.requested.rate', 'enacted_requested_rate', 'double'],
+    ['openaps.enacted.requested.temp', 'enacted_requested_temp', 'text'],
+    ['openaps.enacted.requested.smb', 'enacted_requested_smb', 'double'],
+    ['uploader.type', 'uploader_type', 'text'],
+    ['configuration.pump', 'configuration_pump', 'text'],
+    ['configuration.version', 'configuration_version', 'text'],
+    ['configuration.insulin', 'configuration_insulin', 'int'],
+    ['configuration.aps', 'configuration_aps', 'text'],
+    ['configuration.sensitivity', 'configuration_sensitivity', 'int'],
+    ['configuration.smoothing', 'configuration_smoothing', 'text'],
+    ['configuration.insulinConfiguration', 'insulin_configuration', 'json'],
+    ['configuration.apsConfiguration', 'aps_configuration', 'json'],
+    ['configuration.sensitivityConfiguration', 'sensitivity_configuration', 'json'],
+    ['configuration.overviewConfiguration', 'overview_configuration', 'json'],
+    ['configuration.safetyConfiguration', 'safety_configuration', 'json'],
+  ],
+
+  profile: [
+    ...COMMON,
+    ['defaultProfile', 'default_profile', 'text'],
+    ['startDate', 'start_date', 'text'],
+    ['mills', 'mills', 'bigint'],
+    ['units', 'units', 'text'],
+    ['enteredBy', 'entered_by', 'text'],
+  ],
+
+  food: [
+    ...COMMON,
+    ['type', 'type', 'text'],
+    ['name', 'name', 'text'],
+    ['category', 'category', 'text'],
+    ['subcategory', 'subcategory', 'text'],
+    ['unit', 'unit', 'text'],
+    ['portion', 'portion', 'double'],
+    ['carbs', 'carbs', 'double'],
+    ['gi', 'gi', 'double'],
+    ['energy', 'energy', 'double'],
+    ['protein', 'protein', 'double'],
+    ['fat', 'fat', 'double'],
+  ],
+
+  heartrate: [
+    ...COMMON,
+    ['duration', 'duration', 'bigint'],
+    ['beatsPerMinute', 'beats_per_minute', 'double'],
+  ],
+
+  settings: [...COMMON],
+};
+
+/** Profile fields stored in profile_stores / treatment_profiles. */
+export const PROFILE_FIELDS = [
+  ['dia', 'dia', 'double'],
+  ['units', 'units', 'text'],
+  ['timezone', 'timezone', 'text'],
+  ['carbs_hr', 'carbs_hr', 'double'],
+  ['delay', 'delay', 'double'],
+];
+
+export const SCHEDULE_KINDS = ['basal', 'carbratio', 'sens', 'target_low', 'target_high'];
+
+export const PREDICTION_SOURCES = ['suggested', 'enacted'];

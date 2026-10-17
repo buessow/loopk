@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>loopk — LoopKeeper</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/app.css">
+<script>
+// Day / night as the device is set (or as picked since it last switched); set before drawing.
+(function () {
+  var theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+  try { var o = JSON.parse(localStorage.getItem('loopk.theme')); if (o && o.system === theme) theme = o.theme; } catch (e) {}
+  document.documentElement.dataset.theme = theme;
+})();
+</script>
+</head>
+<body>
+<div class="page">
+  <nav class="nav" style="padding-inline:0;flex-wrap:wrap">
+    <span class="nav-brand brand"><img src="/icon.svg" alt="" width="28" height="28"><span>loopk</span><span class="brand-sub">LoopKeeper</span></span>
+    <span class="tag tag-accent" id="syncText">Loading…</span>
+    <button type="button" class="btn btn-secondary" id="themeToggle"></button>
+    <a href="/admin" id="adminLink" hidden>Access</a>
+    <button class="btn btn-ghost" id="signOut" type="button">Sign out</button>
+  </nav>
+
+  <section class="blueprint stats" id="stats"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div class="stat stat-wide">
+      <div class="stat-kicker" id="glucoseKicker">Glucose now</div>
+      <div style="display:flex;align-items:center;gap:var(--space-4)">
+        <span class="bg-now" id="bgNow">–</span>
+        <span class="tag tag-neutral" id="glucoseAge" hidden></span>
+        <svg width="48" height="48" id="trendIcon" style="color:var(--color-accent)" aria-hidden="true"><g id="trend" transform="translate(24 24) scale(1.8) translate(-12 -12)"><path d="M5 12h14" style="fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round"></path><path d="m12 5 7 7-7 7" style="fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"></path></g></svg>
+      </div>
+      <div class="stat-sub" id="delta">&nbsp;</div>
+    </div>
+    <div class="stat"><div class="stat-kicker">Time in range</div><div class="stat-value"><span id="tir">–</span>%</div><div class="stat-note"><span class="target">3.9–10 mmol/L</span> · <span class="statHours">24 h</span></div></div>
+    <div class="stat"><div class="stat-kicker">Mean glucose</div><div class="stat-value" id="mean">–</div><div class="stat-note"><span class="unit">mmol/L</span> · <span class="statHours">24 h</span></div></div>
+    <div class="stat"><div class="stat-kicker">Basal now</div><div class="stat-value"><span id="basalNow">–</span> U/h</div><div class="stat-note" id="basalNote">&nbsp;</div></div>
+    <div class="stat"><div class="stat-kicker">On board</div><div class="stat-value"><span id="iob">–</span> U</div><div class="stat-note"><span id="cob">–</span> g carbs active</div></div>
+    <div class="stat stat-hr"><div class="stat-kicker">Heart rate</div><div class="stat-value" id="hrNow">–</div><div class="stat-note">bpm</div></div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:var(--space-3)">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-4)">
+      <div class="range-nav">
+        <button type="button" class="btn btn-secondary btn-icon" id="earlier" aria-label="Earlier"><svg width="24" height="24" style="fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m15 18-6-6 6-6"></path></svg></button>
+        <button type="button" class="btn btn-secondary btn-icon" id="later" aria-label="Later"><svg width="24" height="24" style="fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="m9 18 6-6-6-6"></path></svg></button>
+        <h3 id="rangeTitle">Last 24 hours</h3>
+        <button type="button" class="btn btn-ghost" id="toNow" hidden>Back to now</button>
+        <span class="tag" id="loading" hidden>Loading…</span>
+      </div>
+      <div class="legend">
+        <span><svg width="10" height="10"><circle cx="5" cy="5" r="3.5" style="fill:var(--bg-high)"></circle></svg><span id="legHigh">High &gt;10</span></span>
+        <span><svg width="10" height="10"><circle cx="5" cy="5" r="3.5" style="fill:var(--bg-ok)"></circle></svg>In range</span>
+        <span><svg width="10" height="10"><circle cx="5" cy="5" r="3.5" style="fill:var(--bg-low)"></circle></svg><span id="legLow">Low &lt;3.9</span></span>
+        <span><svg width="16" height="10"><path d="M0 10 L0 3 L8 3 L8 6 L16 6 L16 10 Z" style="fill:var(--color-accent-200);stroke:var(--color-accent-600)"></path></svg>Basal delivered</span>
+        <span id="legProfile"><svg width="16" height="10"><path d="M0 4 L16 4" style="stroke:var(--color-accent-900);stroke-dasharray:3 2"></path></svg>Basal profile</span>
+        <span><svg width="10" height="10"><path d="M0 1 L10 1 L5 9 Z" style="fill:var(--color-text)"></path></svg>Bolus</span>
+        <span><svg width="10" height="10"><circle cx="5" cy="5" r="4" style="fill:var(--color-bg);stroke:var(--color-text);stroke-width:1.5"></circle></svg>Carbs</span>
+        <span><svg width="16" height="10"><path d="M0 7 L5 3 L10 6 L16 2" style="fill:none;stroke:var(--color-neutral-700);stroke-width:1.5"></path></svg>Heart rate</span>
+      </div>
+      <div class="seg seg-scroll" id="ranges" role="radiogroup" aria-label="Time range"></div>
+    </div>
+    <div class="blueprint" style="padding:var(--space-3) 0 var(--space-2)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div id="chartWrap" class="chart-wrap"></div>
+    </div>
+    <div class="chart-options">
+      <span class="chart-options-label">Glucose</span>
+      <div class="seg" id="glucoseStyle" role="radiogroup" aria-label="Glucose style"></div>
+      <div class="seg" id="units" role="radiogroup" aria-label="Glucose unit"></div>
+      <label class="check"><input type="checkbox" id="showProfile" checked>Basal profile</label>
+    </div>
+  </section>
+
+  <section class="notes">
+    <div><h6>Basal lane</h6><p>The dashed step line is the basal profile: the hourly rates programmed in the pump. The filled steps are the basal actually delivered. Where the fill rises above the dashed line, the loop raised the rate with a temporary basal; where it drops below it or to zero, delivery was reduced or suspended.</p></div>
+    <div><h6>Events and glucose</h6><p>Boluses (triangles, units) and carbs (circles, grams) sit on the same time axis as the readings, with a guide line down into the glucose lane. Glucose is green inside the <span class="target">3.9–10 mmol/L</span> target band, red above it and blue below it.</p></div>
+  </section>
+</div>
+<script src="/socket.io/socket.io.min.js"></script>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

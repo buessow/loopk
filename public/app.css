@@ -1,0 +1,111 @@
+/* Page layout for the glucose log, taken from the design's inline styles. */
+:root {
+  --bg-high: oklch(0.6 0.19 25);
+  --bg-ok: oklch(0.6 0.19 145);
+  --bg-low: oklch(0.6 0.19 255);
+  --bg-band: oklch(0.95 0.04 145);
+  /* Glucose bars are drawn as stacked boxes in these lighter tones. */
+  --box-high: oklch(0.8 0.05 25);
+  --box-ok: oklch(0.8 0.05 145);
+  --box-low: oklch(0.8 0.05 255);
+}
+
+/* Night theme (Day / Night button; automatic from 21:00 to 7:00). */
+[data-theme="night"] {
+  --color-bg: #111315; --color-surface: #1a1d20; --color-text: #e3e5e8;
+  --color-divider: color-mix(in srgb, #e3e5e8 18%, transparent);
+  --color-accent: #749dc4;
+  --color-neutral-100: #1f2023; --color-neutral-200: #2a2b2e; --color-neutral-300: #3a3b3e;
+  --color-neutral-400: #55565a; --color-neutral-500: #7a7a7d; --color-neutral-600: #98989b;
+  --color-neutral-700: #b7b7ba; --color-neutral-800: #d4d4d7; --color-neutral-900: #e7e7ea;
+  --color-accent-100: #1a2633; --color-accent-200: #24384c; --color-accent-300: #2c455d;
+  --color-accent-400: #416180; --color-accent-500: #597ea3; --color-accent-600: #749dc4;
+  --color-accent-700: #94bce3; --color-accent-800: #b5d9fd; --color-accent-900: #d6ebff;
+  --bg-band: oklch(0.27 0.04 145);
+  --box-high: oklch(0.42 0.07 25);
+  --box-ok: oklch(0.42 0.07 145);
+  --box-low: oklch(0.42 0.07 255);
+  color-scheme: dark;
+}
+
+.page {
+  max-width: 1320px; margin: 0 auto;
+  padding: var(--space-4) clamp(12px, 4vw, var(--space-6)) var(--space-8);
+  display: flex; flex-direction: column; gap: var(--space-6);
+}
+.nav [hidden] { display: none; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0; }
+.stat {
+  box-shadow: 1px 0 0 var(--color-divider), 0 1px 0 var(--color-divider);
+  padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-1);
+}
+.stat-wide { grid-column: span 2; }
+.stat-kicker { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-700); }
+.stat-value { font-family: var(--font-heading); font-weight: 600; font-size: 34px; line-height: 1.1; }
+.stat-note { font-size: 12px; color: var(--color-neutral-700); }
+.stat-sub { font-size: 13px; color: var(--color-neutral-700); }
+.bg-now { font-family: var(--font-heading); font-weight: 600; font-size: 76px; line-height: 1; color: var(--color-neutral-700); }
+.bg-now.high { color: var(--bg-high); }
+.bg-now.ok { color: var(--bg-ok); }
+.bg-now.low { color: var(--bg-low); }
+/* No reading for 10 minutes: the last value, greyed. */
+.bg-now.stale { color: var(--color-neutral-500); }
+/* Out of date: a reading or upload 10 minutes old or more. */
+.tag.tag-warn { background: color-mix(in srgb, var(--bg-high) 14%, transparent); color: var(--bg-high); }
+.stat [hidden] { display: none; }
+
+.brand { display: flex; align-items: center; gap: var(--space-2); }
+.brand img { display: block; }
+.brand-sub { font-family: var(--font-body); font-weight: 400; font-size: 12px; color: var(--color-neutral-700); }
+.btn svg { flex: none; }
+.seg-scroll { max-width: 100%; overflow-x: auto; }
+
+.legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4);
+  font-size: 12px; color: var(--color-neutral-700);
+}
+.legend > span { display: flex; align-items: center; gap: 6px; }
+
+.range-nav { display: flex; align-items: center; gap: var(--space-2); margin-right: auto; min-width: 0; }
+.range-nav h3 { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.range-nav [hidden] { display: none; }
+
+.chart-wrap { position: relative; width: 100%; min-width: 0; overflow: hidden; touch-action: pan-y; }
+.chart-wrap svg { display: block; font-family: var(--font-body); font-size: 11px; }
+/* Vertical swipes still scroll the page; horizontal ones pan the chart. */
+.chart-wrap .hit { fill: transparent; cursor: grab; touch-action: pan-y; }
+.chart-wrap .hit.dragging { cursor: grabbing; }
+.chart-empty { padding: var(--space-8); text-align: center; color: var(--color-neutral-700); }
+
+.notes {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-4) var(--space-6); font-size: 13px; color: var(--color-neutral-800);
+}
+.notes > div { display: flex; flex-direction: column; gap: var(--space-1); }
+.notes h6 { margin: 0; color: var(--color-accent-700); }
+.notes p { margin: 0; text-wrap: pretty; }
+
+/* Sign-in and access pages */
+.center-page { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+.signin { width: min(420px, 100%); padding: var(--space-8) var(--space-6); display: flex; flex-direction: column; gap: var(--space-4); }
+.error { color: var(--bg-high); font-size: 13px; }
+.row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; }
+.row > .field { flex: 1 1 180px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.table-wrap { overflow-x: auto; }
+.table input[type=checkbox] { accent-color: var(--color-accent); width: 16px; height: 16px; }
+
+/* Display options under the chart */
+.chart-options { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-4); font-size: 13px; }
+.chart-options-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-700); }
+.check { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+.check input { accent-color: var(--color-accent); width: 16px; height: 16px; margin: 0; }
+.legend [hidden] { display: none; }
+@media (max-width: 640px) {
+  /* Phones: the time range title wraps rather than being cut off. */
+  .range-nav { flex-wrap: wrap; }
+  /* The heart rate tile would sit alone in a row; the chart shows it. */
+  .stat-hr { display: none; }
+  .range-nav h3 { white-space: normal; font-size: 22px; flex: 1 1 160px; }
+}

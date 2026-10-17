@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Access</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="page">
+  <nav class="nav" style="padding-inline:0">
+    <span class="nav-brand">Access</span>
+    <a href="/">loopk</a>
+  </nav>
+
+  <section style="display:flex;flex-direction:column;gap:var(--space-3)">
+    <h3 style="margin:0">Access tokens</h3>
+    <p class="text-muted" style="margin:0">For apps and devices: enter the token as the NSClient “access token” in AAPS, which needs read &amp; write. Read is enough for apps that only display data.</p>
+    <form class="row" id="tokenForm">
+      <div class="field"><label for="tokenName">Name</label><input class="input" id="tokenName" required placeholder="aaps-phone"></div>
+      <div class="field"><label>Access</label><div class="seg"><label class="seg-opt"><input type="radio" name="tokenAccess" value="read">Read</label><label class="seg-opt"><input type="radio" name="tokenAccess" value="write" checked>Read &amp; write</label></div></div>
+      <button class="btn btn-primary" type="submit">Create token</button>
+    </form>
+    <div class="blueprint table-wrap"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <table class="table"><thead><tr><th>Name</th><th>Access</th><th>Access token</th><th></th></tr></thead><tbody id="tokens"></tbody></table>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:var(--space-3)">
+    <h3 style="margin:0">People</h3>
+    <p class="text-muted" style="margin:0">Google accounts that may sign in to this site and see the data. Admins also manage access tokens and people here.</p>
+    <form class="row" id="userForm">
+      <div class="field"><label for="userEmail">Google email</label><input class="input" id="userEmail" type="email" required></div>
+      <div class="field"><label>Role</label><div class="seg"><label class="seg-opt"><input type="radio" name="userAdmin" value="no" checked>Viewer</label><label class="seg-opt"><input type="radio" name="userAdmin" value="yes">Admin</label></div></div>
+      <button class="btn btn-primary" type="submit">Add person</button>
+    </form>
+    <div class="blueprint table-wrap"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <table class="table"><thead><tr><th>Email</th><th>Name</th><th>Admin</th><th>Last sign-in</th><th></th></tr></thead><tbody id="users"></tbody></table>
+    </div>
+  </section>
+  <p class="error" id="error" hidden></p>
+</div>
+<script type="module" src="/admin.js"></script>
+</body>
+</html>
