@@ -21,10 +21,14 @@
   --color-accent-100: #1a2633; --color-accent-200: #24384c; --color-accent-300: #2c455d;
   --color-accent-400: #416180; --color-accent-500: #597ea3; --color-accent-600: #749dc4;
   --color-accent-700: #94bce3; --color-accent-800: #b5d9fd; --color-accent-900: #d6ebff;
+  /* Brighter glucose traces and markers against the dark chart surface. */
+  --bg-high: oklch(0.72 0.21 25);
+  --bg-ok: oklch(0.74 0.20 145);
+  --bg-low: oklch(0.72 0.19 255);
   --bg-band: oklch(0.27 0.04 145);
-  --box-high: oklch(0.42 0.07 25);
-  --box-ok: oklch(0.42 0.07 145);
-  --box-low: oklch(0.42 0.07 255);
+  --box-high: oklch(0.64 0.13 25);
+  --box-ok: oklch(0.64 0.13 145);
+  --box-low: oklch(0.64 0.13 255);
   color-scheme: dark;
 }
 
@@ -41,8 +45,10 @@
   padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-1);
 }
 .stat-wide { grid-column: span 2; }
+.stat-ranges { grid-column: span 2; }
 .stat-kicker { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-700); }
 .stat-value { font-family: var(--font-heading); font-weight: 600; font-size: 34px; line-height: 1.1; }
+.stat-value.with-trend { display: flex; align-items: center; gap: 0.15em; }
 .stat-note { font-size: 12px; color: var(--color-neutral-700); }
 .stat-sub { font-size: 13px; color: var(--color-neutral-700); }
 .bg-now { font-family: var(--font-heading); font-weight: 600; font-size: 76px; line-height: 1; color: var(--color-neutral-700); }
@@ -54,6 +60,16 @@
 /* Out of date: a reading or upload 10 minutes old or more. */
 .tag.tag-warn { background: color-mix(in srgb, var(--bg-high) 14%, transparent); color: var(--bg-high); }
 .stat [hidden] { display: none; }
+.range-breakdown { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-2); }
+.range-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 11px; color: var(--color-neutral-700); line-height: 1.25; }
+.range-stat b { font-family: var(--font-heading); font-size: 25px; line-height: 1; color: var(--color-text); }
+.stat-trend { display: inline-block; font-family: var(--font-body); font-size: 0.6em; color: var(--color-neutral-700); vertical-align: middle; }
+.stat-value.with-trend .stat-trend { align-self: center; }
+.range-vlow b { color: var(--bg-low); }
+.range-low b { color: color-mix(in srgb, var(--bg-low) 78%, var(--color-text)); }
+.range-ok b { color: var(--bg-ok); font-size: 34px; }
+.range-high b { color: color-mix(in srgb, var(--bg-high) 78%, var(--color-text)); }
+.range-vhigh b { color: var(--bg-high); }
 
 .brand { display: flex; align-items: center; gap: var(--space-2); }
 .brand img { display: block; }
@@ -107,5 +123,10 @@
   .range-nav { flex-wrap: wrap; }
   /* The heart rate tile would sit alone in a row; the chart shows it. */
   .stat-hr { display: none; }
+  .stat-ranges { grid-column: span 2; }
+  .range-breakdown { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: var(--space-3); }
   .range-nav h3 { white-space: normal; font-size: 22px; flex: 1 1 160px; }
 }
+.follow-status { font-size: 14px; line-height: 1.8; }
+/* Components set display (e.g. .btn), which would override the hidden attribute. */
+[hidden] { display: none !important; }

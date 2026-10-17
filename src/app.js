@@ -8,7 +8,7 @@ import { Auth } from './auth/index.js';
 import { createApi2 } from './api2/index.js';
 import { createApi3 } from './api3/index.js';
 import { createSessionRoutes } from './web/session.js';
-import { Follower } from './sync/follower.js';
+import { Following } from './sync/following.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -18,8 +18,10 @@ export async function createContext (config, pool) {
   const auth = new Auth(pool, config);
   await auth.init();
   const ctx = { config, pool, bus, auth };
-  // Started by the server; its presence makes the API refuse data changes.
-  if (config.follow) ctx.follower = new Follower(ctx, config.follow);
+  // The server to follow (Access page, or FOLLOW_URL). The server starts the
+  // follower, ctx.follower; while there is one, the API refuses data changes.
+  ctx.following = new Following(ctx, config.follow);
+  await ctx.following.load();
   return ctx;
 }
 

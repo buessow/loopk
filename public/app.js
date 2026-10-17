@@ -1,4 +1,4 @@
-import { buildModel, docTime, glucoseSeries, MIN, HOUR, MGDL_PER_MMOL } from './model.js';
+import { buildModel, docTime, glucoseSeries, gmiFromMmol, timeInRanges, trendDirection, MIN, HOUR, MGDL_PER_MMOL } from './model.js';
 
 const $ = (id) => document.getElementById(id);
 const RANGES = [3, 6, 12, 24, 48, 168, 720];
@@ -14,9 +14,9 @@ const TREND_ANGLE = {
 // What a periodic or live reload fetches again: the summary tiles and, while
 // the chart shows the present, its newest part.
 const RECENT = 30 * HOUR;
-// The chart pans back to the first reading. At most this much (or three
-// windows) is kept loaded around the visible window; the rest is dropped.
-const KEEP = 60 * 24 * HOUR;
+// Keep a 30-day browser-side buffer either side of the visible chart window.
+// This lets the chart pan through the full history without retaining it all.
+const CACHE_MARGIN = 30 * 24 * HOUR;
 const PAGE = 1000;
 // What the chart needs of a treatment; profile switches add their profile.
 const TREATMENT_FIELDS = 'identifier,date,created_at,srvModified,eventType,type,isSMB,insulin,carbs,glucose,units,'
@@ -174,23 +174,24 @@ async function loadRecent () {
 }
 
 /**
- * Loads what the visible window (and a margin either side) needs and drops
- * what is far from it. Runs one fetch at a time; calls itself until done.
+ * Loads the 30-day cache around the visible window and drops data outside it.
+ * Runs one fetch at a time; calls itself until the cache is complete.
  */
 let extending = null;
 async function ensureLoaded () {
   if (!state.win || extending) return;
-  const { t0, t1 } = windowTimes();
-  const margin = Math.max(24 * HOUR, span());
+  const { from, to } = cacheWindow();
+  const loadedTo = state.loadedTo ?? state.anchor;
   let job = null;
-  if (t0 < state.loadedFrom && state.loadedFrom > earliest()) {
-    job = { from: Math.max(t0 - margin, earliest() - HOUR), to: state.loadedFrom };
-  } else if (state.loadedTo != null && t1 > state.loadedTo) {
-    // Close to now, load up to now and follow the reloads again.
-    const to = t1 + margin >= state.anchor - RECENT ? null : t1 + margin;
-    job = { from: state.loadedTo, to };
+  if (from < state.loadedFrom) {
+    job = { from, to: state.loadedFrom };
+  } else if (to > loadedTo) {
+    job = { from: loadedTo, to };
   }
-  if (!job) return;
+  if (!job) {
+    if (trim()) rebuild();
+    return;
+  }
   extending = (async () => {
     $('loading').hidden = false;
     const [series, switchesBefore] = await Promise.all([
@@ -202,7 +203,8 @@ async function ensureLoaded () {
       state.win.switchesBefore = switchesBefore;
       state.loadedFrom = job.from;
     } else {
-      state.loadedTo = job.to;
+      // null means that recent reloads keep this end current.
+      state.loadedTo = job.to >= state.anchor ? null : job.to;
     }
     trim();
     rebuild();
@@ -216,23 +218,39 @@ async function ensureLoaded () {
   ensureLoaded().catch(console.error);
 }
 
-/** Drops loaded data more than KEEP / 2 away from the middle of the window. */
-function trim () {
+/** The target cache bounds for the current visible chart window. */
+function cacheWindow () {
   const { t0, t1 } = windowTimes();
-  const keep = Math.max(KEEP, 3 * span());
-  const lo = (t0 + t1) / 2 - keep / 2;
-  const hi = (t0 + t1) / 2 + keep / 2;
-  const to = state.loadedTo ?? state.anchor;
+  return {
+    from: Math.max(earliest(), t0 - CACHE_MARGIN),
+    to: Math.min(state.anchor, t1 + CACHE_MARGIN),
+  };
+}
+
+/** Drops documents outside the 30-day cache on either side of the window. */
+function trim () {
+  const { from, to } = cacheWindow();
+  const loadedTo = state.loadedTo ?? state.anchor;
   const w = state.win;
-  if (state.loadedFrom < lo) {
-    // The newest switch dropped is the profile in effect from lo.
-    const before = [...w.switchesBefore, ...w.treatments.filter((d) => docTime(d) < lo && /Profile Switch$/.test(d.eventType || ''))];
+  let changed = false;
+  if (state.loadedFrom < from) {
+    // The newest switch dropped is the profile in effect from the new start.
+    const before = [...w.switchesBefore, ...w.treatments.filter((d) => docTime(d) < from && /Profile Switch$/.test(d.eventType || ''))];
     w.switchesBefore = before.length ? [before[before.length - 1]] : [];
-    state.loadedFrom = lo;
+    state.loadedFrom = from;
+    changed = true;
   }
-  if (to > hi && hi < state.anchor - RECENT) state.loadedTo = hi;
+  if (loadedTo > to) {
+    state.loadedTo = to >= state.anchor ? null : to;
+    changed = true;
+  }
   const inside = (d) => { const t = docTime(d); return t >= state.loadedFrom && (state.loadedTo == null || t < state.loadedTo); };
-  for (const k of SERIES) w[k] = w[k].filter(inside);
+  for (const k of SERIES) {
+    const filtered = w[k].filter(inside);
+    if (filtered.length !== w[k].length) changed = true;
+    w[k] = filtered;
+  }
+  return changed;
 }
 
 function rebuild () {
@@ -287,6 +305,21 @@ function scheduleRender () {
 
 // --- summary tiles -------------------------------------------------------
 
+function renderTrend (id, current, previous, decimals, name) {
+  const el = $(id);
+  const direction = trendDirection(current, previous, decimals);
+  if (!direction) {
+    el.hidden = true;
+    return;
+  }
+  const symbol = { up: '↗', down: '↘', flat: '→' }[direction];
+  const word = { up: 'increased', down: 'decreased', flat: 'unchanged' }[direction];
+  el.hidden = false;
+  el.textContent = symbol;
+  el.title = `${name} ${word} from the previous equal period`;
+  el.setAttribute('aria-label', `${name} ${word} from the previous equal period`);
+}
+
 function renderStats () {
   const N = state.now;
   const G = N.g.filter((p) => p.t >= N.start);
@@ -334,14 +367,33 @@ function renderStats () {
     }
   }
 
-  // Time in range and mean cover the window shown in the chart.
+  // Time in ranges and mean cover the window shown in the chart; trends use
+  // the preceding window of the same duration.
   const { t0, t1 } = windowTimes();
   const W = state.data.g.filter((p) => p.t > t0 && p.t <= t1);
-  const tir = W.length ? Math.round(W.filter((p) => p.v >= LO && p.v <= HI).length / W.length * 100) : null;
-  $('tir').textContent = tir ?? '–';
-  $('mean').textContent = W.length ? fmt(W.reduce((a, p) => a + p.v, 0) / W.length) : '–';
+  const previous = state.data.g.filter((p) => p.t > t0 - span() && p.t <= t0);
+  const ranges = timeInRanges(W);
+  const previousRanges = timeInRanges(previous);
+  $('tirVeryLow').textContent = ranges.veryLow ?? '–';
+  $('tirLow').textContent = ranges.low ?? '–';
+  $('tir').textContent = ranges.inRange ?? '–';
+  $('tirHigh').textContent = ranges.high ?? '–';
+  $('tirVeryHigh').textContent = ranges.veryHigh ?? '–';
+  const mean = W.length ? W.reduce((a, p) => a + p.v, 0) / W.length : null;
+  const previousMean = previous.length ? previous.reduce((a, p) => a + p.v, 0) / previous.length : null;
+  const gmi = gmiFromMmol(mean);
+  const previousGmi = gmiFromMmol(previousMean);
+  $('mean').textContent = mean != null ? fmt(mean) : '–';
+  $('gmi').textContent = gmi != null ? gmi.toFixed(1) : '–';
+  const displayMean = (value) => value != null && mgdl() ? value * MGDL_PER_MMOL : value;
+  renderTrend('meanTrend', displayMean(mean), displayMean(previousMean), mgdl() ? 0 : 1, 'Mean glucose');
+  renderTrend('tirTrend', ranges.inRange, previousRanges.inRange, 0, 'Target time in range');
+  renderTrend('gmiTrend', gmi, previousGmi, 1, 'GMI');
   const label = state.hours <= 24 ? `${state.hours} h` : `${state.hours / 24} d`;
   document.querySelectorAll('.statHours').forEach((el) => { el.textContent = label; });
+  $('gmiNote').textContent = mean != null
+    ? `CGM estimate, not lab HbA1c · ${W.length} readings · ${label}`
+    : `No readings · ${label}`;
 
   const cs = N.basal[N.basal.length - 1];
   $('basalNow').textContent = cs ? cs.rate.toFixed(2) : '–';

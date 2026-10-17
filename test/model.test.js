@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildModel, basalSegments, profileTimeline, tempBasals, eventSeries, onBoard, HOUR, MIN } from '../public/model.js';
+import { buildModel, basalSegments, profileTimeline, tempBasals, eventSeries, gmiFromMmol, onBoard, timeInRanges, trendDirection, HOUR, MIN } from '../public/model.js';
 
 const profile = {
   defaultProfile: 'P',
@@ -50,6 +50,28 @@ test('IOB/COB from recent AAPS device status only', () => {
   const now = Date.now();
   assert.deepEqual(onBoard([{ date: now - MIN, openaps: { iob: { iob: 1.234 }, suggested: { COB: 12 } } }], now), { iob: 1.234, cob: 12 });
   assert.deepEqual(onBoard([{ date: now - 2 * HOUR, openaps: { iob: { iob: 1 } } }], now), { iob: null, cob: null });
+});
+
+test('GMI uses the published CGM mean-glucose equation', () => {
+  // 8 mmol/L is 144 mg/dL: 3.31 + 0.02392 × 144 = 6.75448%.
+  assert.equal(gmiFromMmol(8).toFixed(5), '6.75448');
+  assert.equal(gmiFromMmol(null), null);
+  assert.equal(gmiFromMmol(Infinity), null);
+});
+
+test('time in ranges splits glucose into five exclusive bands', () => {
+  const ranges = timeInRanges([2.9, 3, 3.9, 10, 10.1, 13.9, 14]);
+  assert.deepEqual(ranges, { veryLow: 14, low: 14, inRange: 29, high: 29, veryHigh: 14 });
+  assert.deepEqual(timeInRanges([]), { veryLow: null, low: null, inRange: null, high: null, veryHigh: null });
+});
+
+test('trend direction compares values after their display rounding', () => {
+  assert.equal(trendDirection(65, 64), 'up');
+  assert.equal(trendDirection(64, 65), 'down');
+  assert.equal(trendDirection(64.4, 64.49), 'flat');
+  assert.equal(trendDirection(6.81, 6.79, 1), 'flat');
+  assert.equal(trendDirection(6.86, 6.79, 1), 'up');
+  assert.equal(trendDirection(6.8, null, 1), null);
 });
 
 test('buildModel converts mg/dL to mmol/L and windows events', () => {

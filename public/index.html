@@ -36,8 +36,15 @@
       </div>
       <div class="stat-sub" id="delta">&nbsp;</div>
     </div>
-    <div class="stat"><div class="stat-kicker">Time in range</div><div class="stat-value"><span id="tir">–</span>%</div><div class="stat-note"><span class="target">3.9–10 mmol/L</span> · <span class="statHours">24 h</span></div></div>
-    <div class="stat"><div class="stat-kicker">Mean glucose</div><div class="stat-value" id="mean">–</div><div class="stat-note"><span class="unit">mmol/L</span> · <span class="statHours">24 h</span></div></div>
+    <div class="stat stat-ranges"><div class="stat-kicker">Time in ranges · <span class="statHours">24 h</span></div><div class="range-breakdown">
+      <div class="range-stat range-vlow"><b><span id="tirVeryLow">–</span>%</b><span>Very low<br>&lt;3.0</span></div>
+      <div class="range-stat range-low"><b><span id="tirLow">–</span>%</b><span>Low<br>3.0–3.8</span></div>
+      <div class="range-stat range-ok"><b><span id="tir">–</span>% <span class="stat-trend" id="tirTrend" hidden></span></b><span>Target<br>3.9–10.0</span></div>
+      <div class="range-stat range-high"><b><span id="tirHigh">–</span>%</b><span>High<br>10.1–13.9</span></div>
+      <div class="range-stat range-vhigh"><b><span id="tirVeryHigh">–</span>%</b><span>Very high<br>&gt;13.9</span></div>
+    </div><div class="stat-note"><span class="unit">mmol/L</span> · percentage of readings</div></div>
+    <div class="stat"><div class="stat-kicker">Mean glucose</div><div class="stat-value with-trend"><span id="mean">–</span><span class="stat-trend" id="meanTrend" hidden></span></div><div class="stat-note"><span class="unit">mmol/L</span> · <span class="statHours">24 h</span></div></div>
+    <div class="stat"><div class="stat-kicker">GMI</div><div class="stat-value with-trend"><span id="gmi">–</span><span>%</span><span class="stat-trend" id="gmiTrend" hidden></span></div><div class="stat-note" id="gmiNote">CGM estimate · not laboratory HbA1c</div></div>
     <div class="stat"><div class="stat-kicker">Basal now</div><div class="stat-value"><span id="basalNow">–</span> U/h</div><div class="stat-note" id="basalNote">&nbsp;</div></div>
     <div class="stat"><div class="stat-kicker">On board</div><div class="stat-value"><span id="iob">–</span> U</div><div class="stat-note"><span id="cob">–</span> g carbs active</div></div>
     <div class="stat stat-hr"><div class="stat-kicker">Heart rate</div><div class="stat-value" id="hrNow">–</div><div class="stat-note">bpm</div></div>

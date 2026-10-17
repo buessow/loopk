@@ -5,6 +5,44 @@ export const MIN = 60000;
 export const HOUR = 3600000;
 export const MGDL_PER_MMOL = 18;
 
+/**
+ * Glucose Management Indicator (GMI) as a percentage, calculated from mean
+ * CGM glucose in mmol/L. GMI is an estimate, not a laboratory HbA1c value.
+ * Bergenstal et al. 2018: 3.31 + 0.02392 × mean glucose in mg/dL.
+ */
+export function gmiFromMmol (meanMmol) {
+  return typeof meanMmol === 'number' && Number.isFinite(meanMmol)
+    ? 3.31 + 0.02392 * meanMmol * MGDL_PER_MMOL
+    : null;
+}
+
+/**
+ * Percentage of valid glucose readings in the standard five CGM ranges,
+ * using mmol/L: very low <3.0, low 3.0–3.8, target 3.9–10.0, high
+ * 10.1–13.9, and very high >13.9. Readings may be numbers or { v } points.
+ */
+export function timeInRanges (readings) {
+  const values = readings
+    .map((reading) => typeof reading === 'number' ? reading : reading?.v)
+    .filter((value) => typeof value === 'number' && Number.isFinite(value));
+  const percentage = (predicate) => values.length ? Math.round(values.filter(predicate).length / values.length * 100) : null;
+  return {
+    veryLow: percentage((value) => value < 3),
+    low: percentage((value) => value >= 3 && value < 3.9),
+    inRange: percentage((value) => value >= 3.9 && value <= 10),
+    high: percentage((value) => value > 10 && value <= 13.9),
+    veryHigh: percentage((value) => value > 13.9),
+  };
+}
+
+/** Direction after display rounding: up, down, flat, or null when unavailable. */
+export function trendDirection (current, previous, decimals = 0) {
+  if (![current, previous].every((value) => typeof value === 'number' && Number.isFinite(value))) return null;
+  const scale = 10 ** decimals;
+  const difference = Math.round(current * scale) - Math.round(previous * scale);
+  return difference > 0 ? 'up' : difference < 0 ? 'down' : 'flat';
+}
+
 const BOLUS_TYPES = new Set(['NORMAL', 'SMB', undefined, null, '']);
 
 function num (v) {

@@ -16,11 +16,8 @@ try {
   const app = createApp(ctx);
   const server = http.createServer(app);
   attachSockets(server, ctx);
-  if (ctx.follower) {
-    if (!config.follow.token) throw new Error('FOLLOW_URL needs FOLLOW_TOKEN, an access token on that server.');
-    await ctx.follower.start();
-    console.log(`Following ${config.follow.url}: this server accepts no data changes.`);
-  }
+  if (config.follow && !config.follow.token) console.warn('FOLLOW_URL needs FOLLOW_TOKEN, an access token on that server: not following it.');
+  ctx.following.start();
   server.listen(config.port, () => {
     console.log(`Loopk listening on ${config.baseUrl} (port ${config.port})`);
     if (config.authDisabled) console.warn('AUTH_DISABLED: the web UI is open to anyone who can reach this port, as admin.');
@@ -28,7 +25,7 @@ try {
   });
 
   const shutdown = async () => {
-    await ctx.follower?.stop();
+    await ctx.following.stop();
     server.close(() => pool.end().then(() => process.exit(0)));
     setTimeout(() => process.exit(0), 5000).unref();
   };

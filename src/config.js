@@ -21,7 +21,8 @@ export function loadConfig (env = process.env) {
     secureCookies: baseUrl.startsWith('https://'),
     // Local development only: the browser is signed in as an admin without Google.
     authDisabled: ['1', 'true'].includes(String(env.AUTH_DISABLED).toLowerCase()),
-    // Follow another Nightscout server (its URL and a read access token there).
+    // Follow another Nightscout server (its URL and a read access token there),
+    // unless an admin has set one on the Access page.
     follow: env.FOLLOW_URL ? { url: env.FOLLOW_URL, token: env.FOLLOW_TOKEN || '' } : null,
   };
 }

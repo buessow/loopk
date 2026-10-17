@@ -105,6 +105,28 @@ export function createSessionRoutes (ctx) {
     res.json({ ok: rowCount > 0 });
   }));
 
+  // --- following another Nightscout server, for admins -------------------
+
+  router.get('/api/admin/follow', admin, h(async (req, res) => {
+    res.json(await ctx.following.view());
+  }));
+  // { url, token (omit to keep the saved one), enabled }: checks the server, saves, follows.
+  router.put('/api/admin/follow', admin, h(async (req, res) => {
+    const { url, token, enabled = true } = req.body || {};
+    if (typeof enabled !== 'boolean') return res.status(400).json({ status: 400, message: 'enabled must be true or false' });
+    const by = (await auth.fromRequest(req)).user?.email;
+    try {
+      await ctx.following.configure({ url, token: token ? String(token).trim() : '', enabled }, by);
+    } catch (err) {
+      return res.status(400).json({ status: 400, message: err.message });
+    }
+    res.json(await ctx.following.view());
+  }));
+  router.delete('/api/admin/follow', admin, h(async (req, res) => {
+    await ctx.following.remove();
+    res.json(await ctx.following.view());
+  }));
+
   return router;
 }
 

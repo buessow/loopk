@@ -40,6 +40,21 @@
       <table class="table"><thead><tr><th>Email</th><th>Name</th><th>Admin</th><th>Last sign-in</th><th></th></tr></thead><tbody id="users"></tbody></table>
     </div>
   </section>
+  <section style="display:flex;flex-direction:column;gap:var(--space-3)" id="followSection">
+    <h3 style="margin:0">Follow a Nightscout server</h3>
+    <p class="text-muted" style="margin:0">Copies everything from a Nightscout server as it arrives there: glucose, treatments, loop status, profiles and heart rate. AAPS keeps uploading to that server. While following, this server takes no uploads itself. On the Nightscout server, create a token with the <span class="mono">readable</span> role (Admin tools → Subjects) and enter it here.</p>
+    <div class="follow-status" id="followStatus"></div>
+    <form class="row" id="followForm">
+      <div class="field"><label for="followUrl">Nightscout address</label><input class="input" id="followUrl" type="url" required placeholder="https://my-nightscout.example.com"></div>
+      <div class="field"><label for="followToken">Access token</label><input class="input mono" id="followToken" autocomplete="off" spellcheck="false" placeholder="readable-0123456789abcdef"></div>
+      <button class="btn btn-primary" type="submit" id="followSave">Check and follow</button>
+      <button class="btn btn-secondary" type="button" id="followStop" hidden>Stop following</button>
+      <button class="btn btn-ghost" type="button" id="followRemove" hidden>Remove</button>
+    </form>
+    <div class="blueprint table-wrap" id="followTableWrap" hidden><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <table class="table"><thead><tr><th>Data</th><th>Copied up to</th></tr></thead><tbody id="followTable"></tbody></table>
+    </div>
+  </section>
   <p class="error" id="error" hidden></p>
 </div>
 <script type="module" src="/admin.js"></script>

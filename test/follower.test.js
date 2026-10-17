@@ -6,9 +6,10 @@ import { Server } from 'socket.io';
 import request from 'supertest';
 import { startServer, tokenFor } from './helpers.js';
 import { Follower } from '../src/sync/follower.js';
+import { signInUser } from '../src/web/session.js';
 
 /** A Nightscout server as far as following it goes: token exchange, API v3 history, /storage socket. */
-async function fakeNightscout () {
+async function fakeNightscout ({ headerOnly = false } = {}) {
   const docs = Object.fromEntries(['entries', 'treatments', 'devicestatus', 'profile', 'food', 'heartrate'].map((c) => [c, []]));
   let jwt = 'jwt-1';
   const ns = { docs, requests: [], pageSize: 1000 };
@@ -17,13 +18,25 @@ async function fakeNightscout () {
     if (req.params.token !== 'follow-token') return res.status(401).end();
     res.json({ token: jwt });
   });
-  app.get('/api/v3/:col/history/:lastModified', (req, res) => {
+  app.get('/api/v3/entries', (req, res) => {
+    if (req.get('authorization') !== `Bearer ${jwt}`) return res.status(401).json({ status: 401 });
+    res.json({ status: 200, result: docs.entries.slice(0, 1) });
+  });
+  const history = (req, res, after) => {
     ns.requests.push(req.path);
     if (req.get('authorization') !== `Bearer ${jwt}`) return res.status(401).json({ status: 401 });
-    const after = Number(req.params.lastModified);
     const limit = Math.min(Number(req.query.limit), ns.pageSize);
     const result = docs[req.params.col].filter((d) => d.srvModified > after).sort((a, b) => a.srvModified - b.srvModified).slice(0, limit);
     res.json({ status: 200, result });
+  };
+  app.get('/api/v3/:col/history/:lastModified', (req, res) => {
+    if (headerOnly) return res.status(400).json({ status: 400, message: 'Bad or missing Last-Modified header/parameter' });
+    return history(req, res, Number(req.params.lastModified));
+  });
+  app.get('/api/v3/:col/history', (req, res) => {
+    const lastModified = new Date(req.get('last-modified')).getTime();
+    if (!Number.isFinite(lastModified)) return res.status(400).json({ status: 400, message: 'Bad or missing Last-Modified header/parameter' });
+    return history(req, res, lastModified);
   });
   const server = http.createServer(app);
   const io = new Server(server);
@@ -46,7 +59,7 @@ before(async () => {
   s = await startServer({ FOLLOW_URL: ns.url, FOLLOW_TOKEN: 'follow-token' });
 });
 after(async () => {
-  await s.ctx.follower.stop();
+  await s.ctx.follower?.stop();
   await s.close();
   await ns.close();
 });
@@ -97,6 +110,20 @@ test('exchanges the access token again when the JWT has expired', async () => {
   assert.ok(await s.ctx.follower.stores.entries.findOne('j1'));
 });
 
+test('falls back to Last-Modified history for older Nightscout servers', async () => {
+  const legacy = await fakeNightscout({ headerOnly: true });
+  try {
+    legacy.docs.entries.push(entry('legacy', 42, T));
+    const follower = new Follower(s.ctx, { url: legacy.url, token: 'follow-token' });
+    await follower.sync('entries');
+    assert.ok(await follower.stores.entries.findOne('legacy'));
+    assert.equal(follower.historyMode, 'header');
+    assert.ok(legacy.requests.includes('/api/v3/entries/history'));
+  } finally {
+    await legacy.close();
+  }
+});
+
 test('a change announced on the socket is copied right away', async () => {
   s.ctx.follower.connectSocket();
   await new Promise((resolve) => s.ctx.follower.socket.on('connect', resolve));
@@ -114,4 +141,53 @@ test('while following, the API accepts reads but no data changes', async () => {
   const res = await request(s.app).post('/api/v3/entries').set(bearer).send(entry('x', 50, 1)).expect(403);
   assert.match(res.body.message, /follows/);
   await request(s.app).delete('/api/v3/entries/e2').set(bearer).expect(403);
+});
+
+test('a cursor belongs to the server it was copied from', async () => {
+  assert.ok(await s.ctx.follower.cursor('entries') > 0);
+  const other = new Follower(s.ctx, { url: 'http://other.example.com', token: 'x' });
+  assert.equal(await other.cursor('entries'), 0);
+});
+
+test('admins set the server to follow on the Access page', async () => {
+  const { auth, pool, config } = s.ctx;
+  const cookieOf = async (email) => `${auth.sessionCookieName()}=${auth.signSession(await signInUser(pool, config, { email }))}`;
+  await pool.query("INSERT INTO users (email) VALUES ('viewer@example.com')");
+  const viewer = await cookieOf('viewer@example.com');
+  const admin = await cookieOf('admin@example.com');
+  const put = (body) => request(s.app).put('/api/admin/follow').set('Cookie', admin).send(body);
+
+  await request(s.app).get('/api/admin/follow').set('Cookie', viewer).expect(403);
+  let res = await request(s.app).get('/api/admin/follow').set('Cookie', admin).expect(200);
+  assert.equal(res.body.source, 'environment');
+  assert.equal(res.body.url, ns.url);
+  assert.equal(res.body.collections.find((c) => c.collection === 'entries').copiedUntil > 0, true);
+
+  assert.match((await put({ url: ns.url, token: 'wrong' }).expect(400)).body.message, /did not accept the access token/);
+  assert.match((await put({ url: 'http://localhost:1', token: 'x' }).expect(400)).body.message, /Could not reach/);
+  assert.match((await put({ url: 'ftp://example.com', token: 'x' }).expect(400)).body.message, /https/);
+  assert.equal((await pool.query('SELECT count(*)::int AS n FROM follow_config')).rows[0].n, 0);
+
+  res = await put({ url: ns.url + '/', token: 'follow-token' }).expect(200);
+  assert.equal(res.body.source, 'settings');
+  assert.equal(res.body.following, true);
+  assert.equal(res.body.url, ns.url);
+  assert.equal(res.body.tokenSet, true);
+  assert.equal(res.body.updatedBy, 'admin@example.com');
+  assert.ok(!JSON.stringify(res.body).includes('follow-token'));
+  assert.equal(s.ctx.follower.url, ns.url);
+
+  // Stopped, the API takes uploads again; following again keeps the saved token.
+  const writer = await tokenFor(s.ctx, 'aaps-2');
+  res = await put({ url: ns.url, enabled: false }).expect(200);
+  assert.equal(res.body.following, false);
+  assert.equal(s.ctx.follower, null);
+  await request(s.app).post('/api/v3/entries').set({ Authorization: `Bearer ${writer.jwt}` }).send({ date: T + 3600000, sgv: 120, type: 'sgv', app: 'test', utcOffset: 0 }).expect(201);
+  res = await put({ url: ns.url }).expect(200);
+  assert.equal(res.body.following, true);
+  assert.match((await put({ url: 'http://other.example.com' }).expect(400)).body.message, /access token/);
+
+  res = await request(s.app).delete('/api/admin/follow').set('Cookie', admin).expect(200);
+  assert.equal(res.body.source, 'environment');
+  assert.equal(s.ctx.follower.url, ns.url);
 });
