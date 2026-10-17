@@ -35,6 +35,7 @@ const state = {
   data: null, // model of `win`
   anchor: Date.now(), // "now" the offset counts back from; moved on reload
   earliest: null, // time of the first reading
+  cacheWarmed: false, // first render loads only its visible time range
   hours: stored('hours', (v) => RANGES.includes(+v), 24, Number),
   units: stored('units', (v) => UNITS.includes(v), null),
   style: stored('style', (v) => STYLES.includes(v), 'boxes'),
@@ -221,9 +222,10 @@ async function ensureLoaded () {
 /** The target cache bounds for the current visible chart window. */
 function cacheWindow () {
   const { t0, t1 } = windowTimes();
+  const margin = state.cacheWarmed ? CACHE_MARGIN : 0;
   return {
-    from: Math.max(earliest(), t0 - CACHE_MARGIN),
-    to: Math.min(state.anchor, t1 + CACHE_MARGIN),
+    from: Math.max(earliest(), t0 - margin),
+    to: Math.min(state.anchor, t1 + margin),
   };
 }
 
@@ -734,15 +736,10 @@ function wireChart () {
   });
   const endDrag = (e) => {
     if (!state.drag || e.pointerId !== state.drag.id) return;
-    const tapped = !state.drag.moved;
     state.drag = null;
-    // A tap (touch) shows the values at that time.
-    if (tapped && state.data) {
-      state.hoverT = timeAt(e);
-      renderHover();
-    } else {
-      scheduleRender();
-    }
+    // Touch taps do not open a persistent value popover; values are available
+    // through mouse hover on desktop.
+    scheduleRender();
   };
   wrap.addEventListener('pointerup', endDrag);
   wrap.addEventListener('pointercancel', endDrag);
@@ -885,6 +882,12 @@ async function main () {
   renderOptions();
   render();
   ensureLoaded().catch(console.error);
+  // Let the selected range paint before filling its 30-day buffers. Nested
+  // animation frames ensure at least one browser paint happens first.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    state.cacheWarmed = true;
+    ensureLoaded().catch(console.error);
+  }));
 
   // Live updates over the storage socket; a periodic reload keeps the window sliding.
   let pending = null;
