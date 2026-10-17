@@ -1,0 +1,28 @@
+services:
+  loopk:
+    image: loopk:latest
+    build:
+      context: .
+      # This EC2 host's Docker bridge cannot reach the internet. Dependencies
+      # are installed while building, so use the same host egress path as the
+      # running service.
+      network: host
+    # Host networking permits outbound Google OAuth and Nightscout-following
+    # traffic on this EC2 host. UFW keeps PORT private; Apache reaches it via
+    # 127.0.0.1 only.
+    network_mode: host
+    env_file:
+      - .env
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8084/api/v3/version').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

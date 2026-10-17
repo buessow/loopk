@@ -132,7 +132,7 @@ Copied $SQL to $REMOTE:~/$SQL and stored the passwords in .env (POSTGRES_REMOTE_
 
 Next steps (one-time, on $REMOTE):
   1. Apply the roles:
-       sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres -f ~/$SQL
+       sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres < ~/$SQL
   2. Remove the file:
        shred -u ~/$SQL
   3. Create databases and schema, there or from here:

@@ -54,3 +54,40 @@ The app's database roles can only read and write rows. Schema changes go in a ne
 ## Tests
 
 `npm test` runs against `TEST_DATABASE_URL` (the `loopk_test` database).
+
+## Production deployment
+
+The production layout on `ubuntu@outabout` uses the existing Dockerised Apache
+proxy and host-networked backend services. Loopk listens on private port 8084;
+the proxy is the only public entry point for `https://loopk.outabout.cc`.
+
+One-time setup:
+
+1. Point `loopk.outabout.cc` at the server and issue a certificate that includes
+   it. Create a Google Auth Platform **Web application** client with the
+   redirect URI `https://loopk.outabout.cc/auth/google/callback`.
+2. Create the database roles and apply the generated role SQL on the server:
+
+   ```sh
+   LOOPK_REMOTE=ubuntu@outabout ./setup-db-users.sh --with-prod
+   ssh ubuntu@outabout 'sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres < ~/create-db-users.sql && shred -u ~/create-db-users.sql'
+   ```
+
+3. Render the production-only environment from the OAuth client JSON and the
+   generated production database password. This streams secrets directly to a
+   mode-600 file on the server; never commit it.
+
+   ```sh
+   npm run render:production-env -- /path/to/google-client.json \
+     | ssh ubuntu@outabout 'install -d -m 755 /opt/outabout-infra/services/loopk && install -m 600 /dev/stdin /opt/outabout-infra/services/loopk/.env'
+   ```
+
+Deploy current source with:
+
+```sh
+./deploy.sh
+```
+
+It syncs source while preserving the server `.env`, applies all migrations
+before the new container starts, builds with host networking (required by this
+server), validates/reloads the proxy, and checks the backend endpoint.
