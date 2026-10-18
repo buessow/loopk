@@ -12,7 +12,6 @@
     "start": "node --env-file-if-exists=.env src/server.js",
     "dev": "AUTH_DISABLED=true node --watch --env-file-if-exists=.env src/server.js",
     "token": "node --env-file-if-exists=.env src/cli/token.js",
-    "render:production-env": "node --env-file=.env scripts/render-production-env.js",
     "monitor": "node --env-file-if-exists=.env scripts/monitor.js",
     "test": "node --env-file-if-exists=.env --test --test-concurrency=1 'test/**/*.test.js'",
     "analyze:mongo": "node --env-file-if-exists=.env scripts/mongo-analyze.js",

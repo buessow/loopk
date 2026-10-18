@@ -88,28 +88,12 @@ The production layout on `ubuntu@outabout` uses the existing Dockerised Apache
 proxy and host-networked backend services. Loopk listens on private port 8084;
 the proxy is the only public entry point for `https://loopk.robertbuessow.com`.
 
-One-time setup:
-
-1. Point `loopk.robertbuessow.com` at the server and issue a certificate that includes
-   it. Create a Google Auth Platform **Web application** client with the
-   redirect URI `https://loopk.robertbuessow.com/auth/google/callback`.
-2. Create the database roles and apply the generated role SQL on the server:
-
-   ```sh
-   LOOPK_REMOTE=ubuntu@outabout ./setup-db-users.sh --with-prod
-   ssh ubuntu@outabout 'sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres < ~/create-db-users.sql && shred -u ~/create-db-users.sql'
-   ```
-
-3. Deploy `outabout-infra`'s `services/loopk` (the compose file) to
-   `/opt/outabout-infra/services/loopk`.
-4. Render the production-only environment from the OAuth client JSON and the
-   generated production database password. This streams secrets directly to a
-   mode-600 file on the server; never commit it.
-
-   ```sh
-   npm run render:production-env -- /path/to/google-client.json \
-     | ssh ubuntu@outabout 'install -d -m 755 /opt/outabout-infra/services/loopk && install -m 600 /dev/stdin /opt/outabout-infra/services/loopk/.env'
-   ```
+The server side - Postgres roles, the production `.env`, the Apache vhost and
+certificate, the CI deploy key - is set up by `outabout-infra`'s Ansible
+playbook. The one piece outside it is the Google Auth Platform **Web
+application** client, with the redirect URI
+`https://loopk.robertbuessow.com/auth/google/callback`; its client secret goes
+into the server's `.env` (see `outabout-infra`'s README, "Secrets").
 
 Deploy by pushing to the `production` branch:
 

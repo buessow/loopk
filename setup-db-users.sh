@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 #
-# Creates (or rotates the passwords of) the Postgres roles loopk connects as, and records the
-# credentials in .env. Run it once per machine, before setup-databases.sh - which owns the
-# databases, schema and grants, not credentials.
+# Creates (or rotates the passwords of) the development Postgres roles loopk connects as, and
+# records the credentials in .env. Run it once per machine, before setup-databases.sh - which owns
+# the databases, schema and grants, not credentials.
 #
 #   ./setup-db-users.sh --local                        # apply to this machine's Postgres
-#   ./setup-db-users.sh --local --with-prod            # also the production role (on the server)
 #   LOOPK_REMOTE=user@host ./setup-db-users.sh        # generate SQL and copy it to that host
 #   ./setup-db-users.sh --force                        # regenerate create-db-users.sql if present
 #
 # Roles, one per database (see setup-databases.sh):
 #   loopkdev   local app       -> database loopkdev
 #   loopktest  test suite      -> database loopk_test
-#   loopk      production app  -> database loopk      (only with --with-prod)
+#
+# The production role (loopk) is managed by outabout-infra's Ansible, with its password kept only
+# in the server's .env.
 #
 # Each role is upserted: ALTER if it exists, CREATE otherwise. DROP + CREATE doesn't work because
 # a role owns grants. Rotating a password therefore never touches data or schema.
@@ -24,13 +25,11 @@ cd "$SCRIPT_DIR"
 
 FORCE=0
 RUN_LOCAL=0
-WITH_PROD=0
 for arg in "$@"; do
   case "$arg" in
     --force) FORCE=1 ;;
     --local) RUN_LOCAL=1 ;;
-    --with-prod) WITH_PROD=1 ;;
-    -h|--help) sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '3,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown argument: $arg (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -50,7 +49,6 @@ fi
 genpw() { openssl rand -base64 24 | tr -d '=+/' | cut -c1-32; }
 PASSWORD_DEV="$(genpw)"
 PASSWORD_TEST="$(genpw)"
-PASSWORD_PROD="$(genpw)"
 
 upsert_role() {  # upsert_role <role> <password>
   cat <<SQLBLOCK
@@ -75,11 +73,6 @@ umask 077
   echo
   echo "-- ===== loopktest: test suite ====="
   upsert_role loopktest "$PASSWORD_TEST"
-  if [[ $WITH_PROD -eq 1 ]]; then
-    echo
-    echo "-- ===== loopk: production app ====="
-    upsert_role loopk "$PASSWORD_PROD"
-  fi
 } > "$SQL"
 
 # Upsert KEY=VALUE lines in .env (read by `node --env-file` and direnv's dotenv).
@@ -93,15 +86,9 @@ set_env() {  # set_env KEY VALUE
 if [[ $RUN_LOCAL -eq 1 ]]; then
   set_env DATABASE_URL "postgres://loopkdev:${PASSWORD_DEV}@localhost:5432/loopkdev"
   set_env TEST_DATABASE_URL "postgres://loopktest:${PASSWORD_TEST}@localhost:5432/loopk_test"
-  if [[ $WITH_PROD -eq 1 ]]; then
-    set_env PROD_DATABASE_URL "postgres://loopk:${PASSWORD_PROD}@localhost:5432/loopk"
-  fi
 else
   set_env POSTGRES_REMOTE_DEV_PASSWORD "$PASSWORD_DEV"
   set_env POSTGRES_REMOTE_TEST_PASSWORD "$PASSWORD_TEST"
-  if [[ $WITH_PROD -eq 1 ]]; then
-    set_env POSTGRES_REMOTE_PROD_PASSWORD "$PASSWORD_PROD"
-  fi
 fi
 chmod 600 "$ENV_FILE"
 
@@ -118,7 +105,7 @@ if [[ $RUN_LOCAL -eq 1 ]]; then
 Applied roles to this machine's Postgres and wrote DATABASE_URL / TEST_DATABASE_URL to .env.
 
 Next: create the databases and apply the schema:
-  ./setup-databases.sh --target=local$( [[ $WITH_PROD -eq 1 ]] && echo ' --with-prod')
+  ./setup-databases.sh --target=local
 EOF
   exit 0
 fi
