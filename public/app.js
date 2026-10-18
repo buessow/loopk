@@ -1,4 +1,5 @@
-import { buildModel, docTime, glucoseSeries, gmiFromMmol, timeInRanges, trendDirection, MIN, HOUR, MGDL_PER_MMOL } from './model.js';
+import { buildModel, docTime, glucoseSeries, gmiFromMmol, insulinPerDay, timeInRanges, trendDirection, MIN, HOUR, DAY, MGDL_PER_MMOL } from './model.js';
+import { applyChanges, cacheAvailable, cacheRange, cachedRange, cachedValue, clearCache, cursorFor, saveCursor, saveValue, useCacheFor } from './browser-cache.js';
 
 const $ = (id) => document.getElementById(id);
 const RANGES = [3, 6, 12, 24, 48, 168, 720];
@@ -21,6 +22,7 @@ const PAGE = 1000;
 // What the chart needs of a treatment; profile switches add their profile.
 const TREATMENT_FIELDS = 'identifier,date,created_at,srvModified,eventType,type,isSMB,insulin,carbs,glucose,units,'
   + 'duration,durationInMilliseconds,absolute,rate,percent,profile,profileJson,percentage,timeshift';
+const DEVICESTATUS_FIELDS = 'identifier,date,srvModified,openaps,loop';
 
 // Target range 3.9–10 mmol/L (70–180 mg/dL), as in the design.
 const LO = 3.9;
@@ -98,6 +100,9 @@ async function api (path) {
  * of PAGE sorted by that field. `field` is `date` (epoch ms) or `created_at` (ISO).
  */
 async function fetchRange (col, field, from, to, query = '') {
+  const cached = await cachedRange(col, field, from, to).catch(() => null);
+  if (cached) return cached;
+
   const value = (t) => (field === 'date' ? t : new Date(t).toISOString());
   const docs = new Map();
   let cursor = value(from);
@@ -110,20 +115,74 @@ async function fetchRange (col, field, from, to, query = '') {
     // Continue from the last value; documents sharing it are deduplicated.
     cursor = page[page.length - 1][field];
   }
-  return [...docs.values()];
+  const result = [...docs.values()];
+  // IndexedDB is an optional progressive enhancement: a full/quota-restricted
+  // cache must never prevent the dashboard from loading from the API.
+  await cacheRange(col, result, from, to).catch(() => {});
+  return result;
 }
 
-/** Entries, treatments and heart rate in [from, to). */
+/** Entries, treatments, device status and heart rate in [from, to). */
 async function fetchSeries (from, to) {
-  const [entries, treatments, heartrate] = await Promise.all([
+  const [entries, treatments, devicestatus, heartrate] = await Promise.all([
     fetchRange('entries', 'date', from, to, '&type=sgv&fields=identifier,date,srvModified,sgv,direction,type'),
     fetchRange('treatments', 'created_at', from, to, '&fields=' + TREATMENT_FIELDS),
+    fetchRange('devicestatus', 'date', from, to, '&fields=' + DEVICESTATUS_FIELDS).catch(() => []),
     fetchRange('heartrate', 'date', from, to, '&fields=identifier,date,srvModified,beatsPerMinute').catch(() => []),
   ]);
-  return { entries, treatments, heartrate };
+  return { entries, treatments, devicestatus, heartrate };
 }
 
-const SERIES = ['entries', 'treatments', 'heartrate'];
+const SERIES = ['entries', 'treatments', 'devicestatus', 'heartrate'];
+
+/** Applies only API changes newer than the cursor saved in this browser. */
+async function syncCollection (collection) {
+  let cursor = await cursorFor(collection);
+  if (cursor == null) return false;
+  let changed = false;
+  for (;;) {
+    const docs = await api(`/api/v3/${collection}/history/${cursor}?limit=${PAGE}`);
+    if (!docs.length) return changed;
+    await applyChanges(collection, docs);
+    changed = true;
+    const newest = Math.max(...docs.map((doc) => typeof doc.srvModified === 'number' ? doc.srvModified : 0));
+    const full = docs.length >= PAGE;
+    // The cursor form is exclusive. Step back one millisecond at a page
+    // boundary so records sharing the newest timestamp are not skipped.
+    const next = !full || newest - 1 <= cursor ? newest : newest - 1;
+    if (next > cursor) {
+      cursor = next;
+      await saveCursor(collection, cursor);
+    }
+    if (!full) return changed;
+  }
+}
+
+let cacheSyncing = null;
+
+/**
+ * Initializes a new browser cache at the current server cursors, or catches
+ * an existing cache up through API history. The initial page load has already
+ * fetched its visible interval; every later visit asks only for changes.
+ */
+function syncBrowserCache () {
+  if (cacheSyncing) return cacheSyncing;
+  cacheSyncing = (async () => {
+    if (!(await cacheAvailable())) return false;
+    const cursors = await Promise.all(SERIES.map(cursorFor));
+    if (cursors.some((cursor) => cursor == null)) {
+      const latest = await api('/api/v3/lastModified');
+      await Promise.all(SERIES.map((collection) => saveCursor(collection, latest.collections?.[collection] ?? 0)));
+      return false;
+    }
+    const changed = await Promise.all(SERIES.map(syncCollection));
+    return changed.some(Boolean);
+  })().catch((err) => {
+    console.warn('Browser cache sync failed:', err);
+    return false;
+  }).finally(() => { cacheSyncing = null; });
+  return cacheSyncing;
+}
 
 function merge (old, fresh, keep = () => true) {
   const byId = new Map(old.filter(keep).map((d) => [d.identifier, d]));
@@ -137,7 +196,7 @@ function fetchSwitchBefore (t) {
 }
 
 /** Reloads recent data, device status and profile; the chart keeps what it has loaded. */
-async function loadRecent () {
+async function loadRecent ({ refreshCache = true } = {}) {
   const now = Date.now();
   const from = now - RECENT;
   const [series, devicestatus, profiles, switchesBefore, lastEntry] = await Promise.all([
@@ -172,6 +231,13 @@ async function loadRecent () {
   }
   rebuild();
   ensureLoaded().catch(console.error);
+  if (refreshCache) {
+    syncBrowserCache().then((changed) => {
+      // Redraw from IndexedDB after the incremental history requests finish;
+      // this performs no range request because that interval is cached.
+      if (changed) loadRecent({ refreshCache: false }).catch(console.error);
+    });
+  }
 }
 
 /**
@@ -223,8 +289,11 @@ async function ensureLoaded () {
 function cacheWindow () {
   const { t0, t1 } = windowTimes();
   const margin = state.cacheWarmed ? CACHE_MARGIN : 0;
+  // The insulin/day tile covers a trailing whole number of days, which can
+  // begin before a short visible chart window.
+  const insulinFrom = t1 - Math.ceil(span() / DAY) * DAY;
   return {
-    from: Math.max(earliest(), t0 - margin),
+    from: Math.max(earliest(), Math.min(t0 - margin, insulinFrom)),
     to: Math.min(state.anchor, t1 + margin),
   };
 }
@@ -258,7 +327,7 @@ function trim () {
 function rebuild () {
   const { recent, win } = state;
   state.data = buildModel({
-    ...win, devicestatus: recent.devicestatus, profile: recent.profile,
+    ...win, profile: recent.profile,
     start: state.loadedFrom, now: state.loadedTo ?? state.anchor,
   });
   clampOffset();
@@ -400,6 +469,15 @@ function renderStats () {
   const cs = N.basal[N.basal.length - 1];
   $('basalNow').textContent = cs ? cs.rate.toFixed(2) : '–';
   $('basalNote').textContent = cs && cs.prof > 0 ? `${Math.round(cs.rate / cs.prof * 100)}% of profile ${cs.prof.toFixed(2)}` : 'no profile';
+  const insulinDays = Math.ceil(span() / DAY);
+  const insulinFrom = t1 - insulinDays * DAY;
+  const insulin = state.loadedFrom <= insulinFrom
+    ? insulinPerDay({ start: t0, end: t1, basal: state.data.basal, events: state.data.events })
+    : null;
+  $('insulinPerDay').textContent = insulin ? insulin.perDay.toFixed(1) : '–';
+  $('insulinNote').textContent = insulin
+    ? `Basal ${insulin.basalUnits.toFixed(1)} · bolus ${insulin.bolusUnits.toFixed(1)} · ${insulin.days} ${insulin.days === 1 ? 'day' : 'days'}`
+    : `Loading ${insulinDays} ${insulinDays === 1 ? 'day' : 'days'}…`;
   $('iob').textContent = N.iob != null ? N.iob.toFixed(1) : '–';
   $('cob').textContent = N.cob != null ? Math.round(N.cob) : '–';
   const lastHr = N.hr[N.hr.length - 1];
@@ -444,21 +522,23 @@ function geometry () {
   const iw = W - padL - padR;
   const plotR = padL + iw;
   const { t0, t1 } = windowTimes();
-  const Ln = { bT: 22, bH: 56, eT: 92, eH: 48, gT: 152, gH: 330, hT: 512, hH: 110 };
+  const Ln = { bT: 22, bH: 56, cT: 92, cH: 50, eT: 154, eH: 48, gT: 214, gH: 330, hT: 574, hH: 110 };
   const axis = Ln.hT + Ln.hH + 8;
   const GMIN = 2;
   const GMAX = 20;
   const HMIN = 40;
   const HMAX = 170;
+  const CMAX = Math.max(20, ...D.cobSeries.map((p) => p.v * 1.1));
   const visible = D.basal.filter((s) => s.t1 > t0 && s.t0 < t1);
   const BMAX = Math.max(2.4, ...visible.map((s) => Math.max(s.rate, state.showProfile ? s.prof : 0) * 1.1));
   // Long ranges draw every k-th 5-minute reading (about 400 at most).
   const k = Math.max(1, Math.ceil(state.hours * 12 / 400));
   return {
-    W, H: axis + 26, narrow, padL, padR, iw, plotR, t0, t1, Ln, axis, BMAX, k,
+    W, H: axis + 26, narrow, padL, padR, iw, plotR, t0, t1, Ln, axis, BMAX, CMAX, k,
     X: (t) => padL + (t - t0) / (t1 - t0) * iw,
     GY: (v) => Ln.gT + (1 - (Math.min(GMAX, Math.max(GMIN, v)) - GMIN) / (GMAX - GMIN)) * Ln.gH,
     BY: (v) => Ln.bT + Ln.bH - Math.min(v, BMAX) / BMAX * Ln.bH,
+    CY: (v) => Ln.cT + Ln.cH - Math.min(v, CMAX) / CMAX * Ln.cH,
     HY: (v) => Ln.hT + (1 - (Math.min(HMAX, Math.max(HMIN, v)) - HMIN) / (HMAX - HMIN)) * Ln.hH,
   };
 }
@@ -522,7 +602,7 @@ function glucoseMarks ({ W, iw, X, GY, Ln, t0, t1, k }) {
 function renderChart () {
   const D = state.data;
   const geo = geometry();
-  const { W, H, narrow, padL, plotR, iw, t0, t1, Ln, axis, X, GY, BY, HY, BMAX, k } = geo;
+  const { W, H, narrow, padL, plotR, iw, t0, t1, Ln, axis, X, GY, BY, CY, HY, BMAX, CMAX, k } = geo;
   const longRange = state.hours > 48;
   const out = [];
   const push = (s) => out.push(s);
@@ -533,13 +613,16 @@ function renderChart () {
   push(`<rect x="${padL}" y="${f1(GY(HI))}" width="${iw}" height="${f1(GY(LO) - GY(HI))}" style="fill:var(--bg-band)"></rect>`);
   const gTicks = [LO, 6, 8, HI, 14, 18];
   const bTicks = [0, 1, 2, 3, 4, 5].filter((v) => v <= BMAX);
+  const cobStep = CMAX <= 20 ? 5 : CMAX <= 40 ? 10 : 20;
+  const cobTicks = Array.from({ length: Math.floor(CMAX / cobStep) + 1 }, (_, i) => i * cobStep);
   for (const v of [6, 8, 14, 18]) {
     push(`<line x1="${padL}" x2="${plotR}" y1="${f1(GY(v))}" y2="${f1(GY(v))}" style="stroke:var(--color-divider);stroke-dasharray:2 4"></line>`);
   }
   for (const v of bTicks.filter((v) => v > 0)) push(`<line x1="${padL}" x2="${plotR}" y1="${f1(BY(v))}" y2="${f1(BY(v))}" style="stroke:var(--color-divider);stroke-dasharray:2 4"></line>`);
+  for (const v of cobTicks.filter((v) => v > 0)) push(`<line x1="${padL}" x2="${plotR}" y1="${f1(CY(v))}" y2="${f1(CY(v))}" style="stroke:var(--color-divider);stroke-dasharray:2 4"></line>`);
   for (const v of [60, 100, 140]) push(`<line x1="${padL}" x2="${plotR}" y1="${f1(HY(v))}" y2="${f1(HY(v))}" style="stroke:var(--color-divider);stroke-dasharray:2 4"></line>`);
   const base = Ln.bT + Ln.bH;
-  for (const y of [base, gBot, Ln.hT + Ln.hH, axis]) push(`<line x1="${padL}" x2="${plotR}" y1="${y}" y2="${y}" style="stroke:var(--color-divider)"></line>`);
+  for (const y of [base, Ln.cT + Ln.cH, gBot, Ln.hT + Ln.hH, axis]) push(`<line x1="${padL}" x2="${plotR}" y1="${y}" y2="${y}" style="stroke:var(--color-divider)"></line>`);
 
   // Time ticks: hours up to two days, then midnights.
   const h = state.hours;
@@ -579,6 +662,10 @@ function renderChart () {
     push(`<path d="${line}" style="fill:none;stroke:var(--color-accent-600);stroke-width:1.25"></path>`);
     if (state.showProfile) push(`<path d="${prof}" style="fill:none;stroke:var(--color-accent-900);stroke-width:1;stroke-dasharray:4 3"></path>`);
   }
+
+  // Carbs on board reported by the loop at each device-status update.
+  const cob = sampled(D.cobSeries, t0, t1, k);
+  push(`<path d="${linePath(cob, X, CY, Math.max(20, 10 * k) * MIN)}" style="fill:none;stroke:var(--color-accent-600);stroke-width:1.5;stroke-linejoin:round"></path>`);
 
   // Events; guide lines and labels only up to two days. SMBs get no guide
   // line and are left out beyond two days: there are hundreds a day.
@@ -625,14 +712,16 @@ function renderChart () {
   // The basal lane is short: on phones, every second value and no zero.
   const bLabels = narrow ? bTicks.filter((x) => x > 0 && (BMAX > 3 ? x % 2 === 0 : true)) : bTicks.filter((x) => x <= 2 || BMAX > 3);
   for (const v of bLabels) text(yx, f1(BY(v)), v.toFixed(1), ys);
+  for (const v of cobTicks) text(yx, f1(CY(v)), String(v), ys);
   for (const v of [60, 80, 100, 120, 140, 160]) text(yx, f1(HY(v)), String(v), ys);
   const laneStyle = 'fill:var(--color-accent-700);font-size:10px;letter-spacing:0.1em';
   text(padL + 4, Ln.bT - 8, 'BASAL · U/H' + (narrow ? '' : ' · FILL = DELIVERED' + (state.showProfile ? ', DASHED = PROFILE' : '')), laneStyle);
+  text(padL + 4, Ln.cT - 8, 'CARBS ON BOARD · G', laneStyle);
   text(padL + 4, Ln.eT - 2, 'BOLUS (U) · CARBS (G)', laneStyle);
   text(padL + 4, Ln.gT - 6, 'GLUCOSE · ' + unit().toUpperCase(), laneStyle);
   text(padL + 4, Ln.hT - 6, 'HEART RATE · BPM', laneStyle);
   for (const [x, y, s, st] of labels) text(x, y, s, st);
-  for (const [s, y] of narrow ? [] : [['U/h', Ln.bT + Ln.bH / 2], [unit(), Ln.gT + Ln.gH / 2], ['bpm', Ln.hT + Ln.hH / 2]]) {
+  for (const [s, y] of narrow ? [] : [['U/h', Ln.bT + Ln.bH / 2], ['g', Ln.cT + Ln.cH / 2], [unit(), Ln.gT + Ln.gH / 2], ['bpm', Ln.hT + Ln.hH / 2]]) {
     push(`<text x="0" y="0" transform="translate(${W - 10} ${y}) rotate(90)" style="text-anchor:middle;font-family:var(--font-body);font-size:10px;letter-spacing:0.08em;fill:var(--color-accent-700)">${esc(s)}</text>`);
   }
 
@@ -662,6 +751,7 @@ function renderHover () {
   const t = p ? p.t : state.hoverT;
   const x = X(t);
   const sg = D.basal.find((s) => t >= s.t0 && t < s.t1);
+  const cob = nearest(D.cobSeries.filter((q) => Math.abs(q.t - t) <= 10 * MIN), t, 10 * MIN);
   const h = nearest(D.hr.filter((q) => Math.abs(q.t - t) <= 10 * MIN), t, 10 * MIN);
   const left = Math.round(x > W - 220 ? x - 194 : x + 14);
   const time = state.hours > 24 || state.offset > 0 ? dayHm(t) : hm(t);
@@ -673,6 +763,7 @@ function renderHover () {
     + `<span style="color:var(--color-neutral-700)">Glucose</span><span>${p ? fmt(p.v) + ' ' + unit() : '–'}</span>`
     + `<span style="color:var(--color-neutral-700)">Basal</span><span>${sg ? sg.rate.toFixed(2) + ' U/h' : '–'}</span>`
     + (state.showProfile ? `<span style="color:var(--color-neutral-700)">Profile</span><span>${sg ? sg.prof.toFixed(2) + ' U/h' : '–'}</span>` : '')
+    + `<span style="color:var(--color-neutral-700)">COB</span><span>${cob ? Math.round(cob.v) + ' g' : '–'}</span>`
     + `<span style="color:var(--color-neutral-700)">Heart rate</span><span>${h ? h.v + ' bpm' : '–'}</span>`
     + '</div></foreignObject>';
 }
@@ -857,8 +948,10 @@ async function main () {
     return;
   }
   const session = await res.json();
+  await useCacheFor(session.user.email).catch(() => {});
   $('adminLink').hidden = !session.isAdmin;
   $('signOut').addEventListener('click', async () => {
+    await clearCache().catch(() => {});
     await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
     location.href = '/login';
   });
@@ -870,10 +963,17 @@ async function main () {
 
   try {
     const [first] = await Promise.all([
-      api('/api/v3/entries?type=sgv&sort=date&limit=1&fields=date').catch(() => []),
+      (async () => {
+        const cached = await cachedValue('earliest-entry');
+        if (cached != null) return cached;
+        const [entry] = await api('/api/v3/entries?type=sgv&sort=date&limit=1&fields=date').catch(() => []);
+        const earliest = entry ? docTime(entry) : null;
+        if (earliest != null) await saveValue('earliest-entry', earliest);
+        return earliest;
+      })(),
       loadRecent(),
     ]);
-    if (first[0]) state.earliest = docTime(first[0]);
+    if (first != null) state.earliest = first;
   } catch (err) {
     console.error(err);
     $('chartWrap').innerHTML = '<div class="chart-empty">Could not load data.</div>';

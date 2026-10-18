@@ -3,6 +3,9 @@ import { loadConfig } from './config.js';
 import { createPool } from './db/index.js';
 import { createApp, createContext, checkSchema } from './app.js';
 import { attachSockets } from './sockets.js';
+import { forwardConsoleLogs } from './monitoring/console-logs.js';
+
+forwardConsoleLogs();
 
 const config = loadConfig();
 const pool = createPool(config.databaseUrl);

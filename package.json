@@ -9,10 +9,11 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node --env-file-if-exists=.env src/server.js",
-    "dev": "AUTH_DISABLED=true node --watch --env-file-if-exists=.env src/server.js",
+    "start": "node --import newrelic/esm-loader.mjs --require newrelic --env-file-if-exists=.env src/server.js",
+    "dev": "AUTH_DISABLED=true node --import newrelic/esm-loader.mjs --require newrelic --watch --env-file-if-exists=.env src/server.js",
     "token": "node --env-file-if-exists=.env src/cli/token.js",
     "render:production-env": "node --env-file=.env scripts/render-production-env.js",
+    "monitor": "node --env-file-if-exists=.env scripts/monitor.js",
     "test": "node --env-file-if-exists=.env --test --test-concurrency=1 'test/**/*.test.js'",
     "analyze:mongo": "node --env-file-if-exists=.env scripts/mongo-analyze.js",
     "migrate:mongo": "node --env-file-if-exists=.env scripts/mongo-migrate.js"
@@ -22,6 +23,7 @@
     "express": "^4.22.3",
     "google-auth-library": "^11.3.1",
     "jsonwebtoken": "^9.0.3",
+    "newrelic": "^14.8.0",
     "pg": "^8.23.1",
     "socket.io": "^4.8.4",
     "socket.io-client": "^4.8.4",

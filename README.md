@@ -2,6 +2,32 @@
 
 A small Nightscout-compatible server for AAPS, backed by PostgreSQL, with a glucose log web page and Google sign-in.
 
+## How Loopk works
+
+Loopk sits between diabetes devices or AAPS and a PostgreSQL database. AAPS
+uses the Nightscout API v3 to upload and synchronize glucose entries,
+treatments, device status, profiles, food, and heart-rate data. Loopk exposes
+the small API v2 token-exchange endpoint that NSClient needs as well, and sends
+live changes through its `/storage` Socket.IO namespace.
+
+Express routes requests to the API, authentication, and static dashboard. The
+API maps the known Nightscout fields to typed Postgres columns and child tables;
+unrecognized fields are retained in `extra` JSONB so documents can round-trip
+without losing data. Each write receives a server-modified timestamp. Clients
+use that timestamp, ETags, and collection history endpoints as incremental sync
+cursors instead of repeatedly downloading the entire history.
+
+The dashboard in `public/` is a dependency-free browser application. It fetches
+the selected glucose range, derives charts and insulin metrics locally, and
+caches recent collection data in IndexedDB. On later visits it paints the cache
+first, then requests only changes after its stored history cursor.
+
+During a Nightscout migration, configure `FOLLOW_URL` and `FOLLOW_TOKEN`.
+Loopk imports history from that server and listens for its live storage events,
+so it remains a read-only mirror until AAPS is switched over. A direct MongoDB
+migration can seed the database first, allowing following to resume from the
+latest imported server cursor rather than replaying years of data.
+
 It implements the parts of the Nightscout API that AAPS's NSClient V3 uses:
 
 - **API v3** (`/api/v3`): `status`, `version`, `lastModified`, and for `entries`, `treatments`, `devicestatus`, `profile`, `food`, `settings` and `heartrate`: search, create (with Nightscout's deduplication), read, update, patch, soft delete and history. The response formats, error messages and `srvModified`/ETag sync cursors match `buessow/cgm-remote-monitor`.
@@ -37,6 +63,7 @@ The app's database roles can only read and write rows. Schema changes go in a ne
 | `ALLOWED_EMAILS` | Further accounts allowed to sign in read-only (admins can also add people on `/admin`) |
 | `FOLLOW_URL`, `FOLLOW_TOKEN` | Follow this Nightscout server with this access token (read is enough); see below |
 | `MONGO_URL` | Nightscout MongoDB, for the analysis and migration scripts |
+| `NEW_RELIC_LICENSE_KEY` | New Relic license key for production APM, application log forwarding, and freshness metrics |
 
 ## Moving from Nightscout
 
@@ -91,3 +118,11 @@ Deploy current source with:
 It syncs source while preserving the server `.env`, applies all migrations
 before the new container starts, builds with host networking (required by this
 server), validates/reloads the proxy, and checks the backend endpoint.
+
+The Loopk server reports APM data and forwards its application console logs to
+the New Relic application named `Loopk`.
+The same image also runs `loopk-monitor`, a small Postgres freshness monitor
+that reports the newest glucose entry, heart-rate, treatment, and device-status
+timestamp plus its delay every ten seconds. Set `NEW_RELIC_LICENSE_KEY` in the
+production `.env` to send both APM and freshness data to New Relic. Without the
+key, the monitor still logs the freshness values and the agent stays disabled.
