@@ -111,18 +111,19 @@ One-time setup:
      | ssh ubuntu@outabout 'install -d -m 755 /opt/outabout-infra/services/loopk && install -m 600 /dev/stdin /opt/outabout-infra/services/loopk/.env'
    ```
 
-Deploy current source with:
+Deploy by pushing to the `production` branch:
 
 ```sh
-./deploy.sh
+git push origin master:production
 ```
 
-The compose file (`services/loopk/docker-compose.yml`), the `.env` template
-and the Apache vhost live in the `outabout-infra` repo and are deployed from
-there. `deploy.sh` syncs source to `~/loopk-src` on the server, applies all
-migrations before the new container starts, builds `loopk:latest` with host
-networking (required by this server), restarts the containers against that
-compose file, and checks the backend endpoint.
+GitHub Actions builds the image, pushes it to `ghcr.io/robertbuessow/loopk`,
+then SSHes to the server and runs `outabout-infra`'s
+`services/loopk/deploy.sh`, which pulls the image, applies all migrations
+(shipped in the image) before the new container starts, restarts the
+containers, and checks the backend endpoint. The compose file, the `.env`
+template and the Apache vhost live in `outabout-infra`. The workflow needs
+the repo secrets `DEPLOY_HOST`, `DEPLOY_USER` and `DEPLOY_SSH_KEY`.
 
 Production is monitored by the Netdata Agent on the host. Both containers log
 to the systemd journal, which Netdata shows in its Logs tab: filter on

@@ -1,5 +1,6 @@
-# Runtime-only image: migrations are included because the app checks that the
-# database is current at startup, while DDL is deliberately run by deploy.sh.
+# Runtime-only image: migrations (and setup-databases.sh, which applies them)
+# are included because the app checks that the database is current at startup,
+# while DDL is deliberately run beforehand by the host's deploy script.
 FROM node:22-bookworm-slim AS dependencies
 
 WORKDIR /app
@@ -17,6 +18,7 @@ COPY --chown=node:node src ./src
 COPY --chown=node:node scripts ./scripts
 COPY --chown=node:node public ./public
 COPY --chown=node:node migrations ./migrations
+COPY --chown=node:node setup-databases.sh ./
 
 USER node
 EXPOSE 8084
