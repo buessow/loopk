@@ -323,6 +323,17 @@ export function splitDocument (table, doc) {
 
 // --- queries -------------------------------------------------------------------
 
+// A parameter typed like its column lets Postgres use the column's index:
+// comparing a bigint column with a numeric value casts every row instead.
+const NUMBER_SQL_TYPES = { bigint: 'bigint', int: 'bigint', double: 'double precision' };
+const NOT_NULL_COLUMNS = new Set(['identifier', 'srv_created', 'srv_modified']);
+
+/** The SQL type to cast number parameters for field `f` to; numeric keeps fractions exact for integer columns. */
+function numberCast (f, values) {
+  if (f.numberType === 'bigint') return values.every(Number.isSafeInteger) ? 'bigint' : 'numeric';
+  return f.numberType || 'numeric';
+}
+
 /**
  * Translates Nightscout filter definitions ({ field, operator, value }) and
  * sorts into SQL: mapped fields compare their column, other fields the value
@@ -344,7 +355,7 @@ class QueryBuilder {
     if (f) {
       const [, col, type] = f;
       const kind = { json: 'jsonb', jsonString: 'jsonb', double: 'number', bigint: 'number', int: 'number', bool: 'boolean' }[type] || type;
-      return { sql: quote(col), type: kind };
+      return { sql: quote(col), type: kind, numberType: NUMBER_SQL_TYPES[type], notNull: NOT_NULL_COLUMNS.has(col) };
     }
     if (!FIELD_RE.test(name)) throw new BadFilterError(`Invalid field ${name}`);
     return { sql: `(extra #> ${this.param(name.split('.'))}::text[])`, type: 'jsonb' };
@@ -359,7 +370,8 @@ class QueryBuilder {
       if (f.type === 'jsonb') {
         match = `(jsonb_typeof(${f.sql}) IN ('string', 'number') AND ${f.sql} #>> '{}' = ANY(${this.param(values)}::text[]))`;
       } else if (f.type === 'number') {
-        match = `${f.sql} = ANY(${this.param(values.map(Number).filter(Number.isFinite))}::numeric[])`;
+        const numbers = values.map(Number).filter(Number.isFinite);
+        match = `${f.sql} = ANY(${this.param(numbers)}::${numberCast(f, numbers)}[])`;
       } else if (f.type === 'ts') {
         match = `${f.sql} = ANY(${this.param(values.filter((v) => !Number.isNaN(Date.parse(v))))}::timestamptz[])`;
       } else {
@@ -385,15 +397,15 @@ class QueryBuilder {
       return `(jsonb_typeof(${f.sql}) = jsonb_typeof(${p}::jsonb) AND ${f.sql} ${COMPARATORS[operator]} ${p}::jsonb)`;
     }
 
-    const typed = this.typedParam(f.type, value);
+    const typed = this.typedParam(f, value);
     if (typed === null) return operator === 'ne' ? 'TRUE' : 'FALSE';
     if (operator === 'ne') return `${f.sql} IS DISTINCT FROM ${typed}`;
     return `${f.sql} ${COMPARATORS[operator]} ${typed}`;
   }
 
   /** The value as a typed parameter, or null if no value of the column can match it (Mongo semantics). */
-  typedParam (type, value) {
-    if (type === 'number') return typeof value === 'number' ? `${this.param(value)}::numeric` : null;
+  typedParam ({ type, ...f }, value) {
+    if (type === 'number') return typeof value === 'number' ? `${this.param(value)}::${numberCast(f, [value])}` : null;
     if (type === 'boolean') return typeof value === 'boolean' ? `${this.param(value)}::boolean` : null;
     if (type === 'ts') return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? `${this.param(value)}::timestamptz` : null;
     return typeof value === 'string' ? `${this.param(value)}::text` : null;
@@ -409,6 +421,9 @@ class QueryBuilder {
   orderBy (sort) {
     const parts = Object.entries(sort || {}).map(([name, dir]) => {
       const f = this.field(name);
+      // Mongo sorts nulls lowest. The date indexes are built NULLS FIRST to
+      // match; columns without nulls use the plain order their index has.
+      if (f.notNull) return dir < 0 ? `${f.sql} DESC` : `${f.sql} ASC`;
       return dir < 0 ? `${f.sql} DESC NULLS LAST` : `${f.sql} ASC NULLS FIRST`;
     });
     parts.push('identifier');

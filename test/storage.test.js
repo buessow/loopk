@@ -135,3 +135,48 @@ test('bulkUpsert inserts and replaces documents, keeping their server timestamps
   const { rows } = await s.ctx.pool.query("SELECT suggested_console_log FROM devicestatus WHERE identifier = 'b1'");
   assert.deepEqual(rows[0].suggested_console_log, ['a', 'b']);
 });
+
+/** The plan of the SQL findMany builds for `query` on `table`. */
+async function planFor (table, query) {
+  const store = new CollectionStore(s.ctx.pool, table);
+  let captured;
+  store.pool = { query: async (sql, params) => { captured ??= { sql, params }; return { rows: [] }; } };
+  await store.findMany(query);
+  const client = await s.ctx.pool.connect();
+  try {
+    // Empty test tables make a table scan and a sort cheapest; forbid both so
+    // the plan only falls back to them when no index can serve the query.
+    await client.query('SET enable_seqscan = off');
+    await client.query('SET enable_sort = off');
+    const { rows } = await client.query('EXPLAIN ' + captured.sql, captured.params);
+    return rows.map((row) => row['QUERY PLAN']).join('\n');
+  } finally {
+    await client.query('RESET ALL');
+    client.release();
+  }
+}
+
+test('history and newest-first date searches are answered from an index without sorting', async () => {
+  const newestFirst = { identifier: -1, created_at: -1 };
+  const queries = [
+    ['devicestatus', { filter: [{ field: 'srvModified', operator: 'gt', value: 1760000000000 }], sort: { srvModified: 1 }, limit: 1000 }],
+    ['devicestatus', { filter: [{ field: 'date', operator: 'gt', value: 1760000000000 }], sort: { date: -1, ...newestFirst }, limit: 1000, onlyValid: true }],
+    ['entries', { filter: [{ field: 'type', operator: 'eq', value: 'sgv' }], sort: { date: -1, ...newestFirst }, limit: 10, onlyValid: true }],
+    ['treatments', { filter: [{ field: 'created_at', operator: 'gt', value: '2025-10-09T00:00:00Z' }], sort: { created_at: -1, identifier: -1, date: -1 }, limit: 1000, onlyValid: true }],
+  ];
+  for (const [table, query] of queries) {
+    const plan = await planFor(table, query);
+    assert.doesNotMatch(plan, /Seq Scan/, plan);
+    // An incremental sort only orders rows within equal keys, so LIMIT still stops early.
+    assert.doesNotMatch(plan, /(^|->)\s*Sort\s+\(/m, plan);
+  }
+});
+
+test('number filters on integer columns keep fractional values exact', async () => {
+  const store = new CollectionStore(s.ctx.pool, 'heartrate');
+  await store.insert({ ...common('hr-fraction'), date: 1000, beatsPerMinute: 60 });
+  const match = (filter) => store.findMany({ filter, sort: { date: 1 }, limit: 10 }).then((docs) => docs.map((d) => d.identifier));
+  assert.deepEqual(await match([{ field: 'date', operator: 'gt', value: 999.5 }]), ['hr-fraction']);
+  assert.deepEqual(await match([{ field: 'date', operator: 'gt', value: 1000.5 }]), []);
+  assert.deepEqual(await match([{ field: 'date', operator: 'in', value: '1000|2000' }]), ['hr-fraction']);
+});
