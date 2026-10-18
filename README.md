@@ -123,7 +123,10 @@ then SSHes to the server and runs `outabout-infra`'s
 (shipped in the image) before the new container starts, restarts the
 containers, and checks the backend endpoint. The compose file, the `.env`
 template and the Apache vhost live in `outabout-infra`. The workflow needs
-the repo secrets `DEPLOY_HOST`, `DEPLOY_USER` and `DEPLOY_SSH_KEY`.
+the repo secrets `DEPLOY_HOST`, `DEPLOY_USER` and `DEPLOY_SSH_KEY`; on the
+server, that key is restricted to the deploy script by a forced command in
+`authorized_keys`, and `sudo docker login ghcr.io` (a classic token with only
+`read:packages`) lets it pull the private image.
 
 Production is monitored by the Netdata Agent on the host. Both containers log
 to the systemd journal, which Netdata shows in its Logs tab: filter on

@@ -34,16 +34,13 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-      # The host-side script (in outabout-infra) pulls the image, applies its
-      # migrations, then restarts the containers. The package is private, so it
-      # pulls with this job's short-lived token.
+      # The deploy key is pinned on the host to outabout-infra's
+      # services/loopk/deploy.sh by a forced command, which runs regardless of
+      # `script` - it pulls the image, applies its migrations, then restarts
+      # the containers. `script` just documents what runs.
       - uses: appleboy/ssh-action@v1
-        env:
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN
           script: /opt/outabout-infra/services/loopk/deploy.sh
