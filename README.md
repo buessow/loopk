@@ -100,7 +100,9 @@ One-time setup:
    ssh ubuntu@outabout 'sudo -u postgres psql -v ON_ERROR_STOP=1 -d postgres < ~/create-db-users.sql && shred -u ~/create-db-users.sql'
    ```
 
-3. Render the production-only environment from the OAuth client JSON and the
+3. Deploy `outabout-infra`'s `services/loopk` (the compose file) to
+   `/opt/outabout-infra/services/loopk`.
+4. Render the production-only environment from the OAuth client JSON and the
    generated production database password. This streams secrets directly to a
    mode-600 file on the server; never commit it.
 
@@ -115,9 +117,12 @@ Deploy current source with:
 ./deploy.sh
 ```
 
-It syncs source while preserving the server `.env`, applies all migrations
-before the new container starts, builds with host networking (required by this
-server), validates/reloads the proxy, and checks the backend endpoint.
+The compose file (`services/loopk/docker-compose.yml`), the `.env` template
+and the Apache vhost live in the `outabout-infra` repo and are deployed from
+there. `deploy.sh` syncs source to `~/loopk-src` on the server, applies all
+migrations before the new container starts, builds `loopk:latest` with host
+networking (required by this server), restarts the containers against that
+compose file, and checks the backend endpoint.
 
 Production is monitored by the Netdata Agent on the host. Both containers log
 to the systemd journal, which Netdata shows in its Logs tab: filter on
