@@ -86,13 +86,13 @@ The app's database roles can only read and write rows. Schema changes go in a ne
 
 The production layout on `ubuntu@outabout` uses the existing Dockerised Apache
 proxy and host-networked backend services. Loopk listens on private port 8084;
-the proxy is the only public entry point for `https://loopk.outabout.cc`.
+the proxy is the only public entry point for `https://loopk.robertbuessow.com`.
 
 One-time setup:
 
-1. Point `loopk.outabout.cc` at the server and issue a certificate that includes
+1. Point `loopk.robertbuessow.com` at the server and issue a certificate that includes
    it. Create a Google Auth Platform **Web application** client with the
-   redirect URI `https://loopk.outabout.cc/auth/google/callback`.
+   redirect URI `https://loopk.robertbuessow.com/auth/google/callback`.
 2. Create the database roles and apply the generated role SQL on the server:
 
    ```sh
