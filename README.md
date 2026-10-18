@@ -117,7 +117,7 @@ Deploy by pushing to the `production` branch:
 git push origin master:production
 ```
 
-GitHub Actions builds the image, pushes it to `ghcr.io/robertbuessow/loopk`,
+GitHub Actions builds the image, pushes it to `ghcr.io/buessow/loopk`,
 then SSHes to the server and runs `outabout-infra`'s
 `services/loopk/deploy.sh`, which pulls the image, applies all migrations
 (shipped in the image) before the new container starts, restarts the
