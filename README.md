@@ -63,7 +63,7 @@ The app's database roles can only read and write rows. Schema changes go in a ne
 | `ALLOWED_EMAILS` | Further accounts allowed to sign in read-only (admins can also add people on `/admin`) |
 | `FOLLOW_URL`, `FOLLOW_TOKEN` | Follow this Nightscout server with this access token (read is enough); see below |
 | `MONGO_URL` | Nightscout MongoDB, for the analysis and migration scripts |
-| `NEW_RELIC_LICENSE_KEY` | New Relic license key for production APM, application log forwarding, and freshness metrics |
+| `STATSD_HOST`, `STATSD_PORT` | Netdata StatsD server for the freshness monitor (default `127.0.0.1:8125`) |
 
 ## Moving from Nightscout
 
@@ -119,10 +119,13 @@ It syncs source while preserving the server `.env`, applies all migrations
 before the new container starts, builds with host networking (required by this
 server), validates/reloads the proxy, and checks the backend endpoint.
 
-The Loopk server reports APM data and forwards its application console logs to
-the New Relic application named `Loopk`.
-The same image also runs `loopk-monitor`, a small Postgres freshness monitor
-that reports the newest glucose entry, heart-rate, treatment, and device-status
-timestamp plus its delay every ten seconds. Set `NEW_RELIC_LICENSE_KEY` in the
-production `.env` to send both APM and freshness data to New Relic. Without the
-key, the monitor still logs the freshness values and the agent stays disabled.
+Production is monitored by the Netdata Agent on the host. Both containers log
+to the systemd journal, which Netdata shows in its Logs tab: filter on
+`SYSLOG_IDENTIFIER` `loopk` (one line per API request, with status and
+duration; 5xx responses at error priority) or `loopk-monitor`. Netdata's
+cgroups collector charts the containers' CPU, memory, and network use. The
+same image also runs `loopk-monitor`, a small Postgres freshness monitor that
+every ten seconds sends the delay since the newest glucose entry, heart-rate,
+treatment, and device-status record as StatsD gauges
+(`loopk.<collection>_sync_delay_seconds`) to Netdata on `127.0.0.1:8125`, and
+logs a line whenever one of them changes.

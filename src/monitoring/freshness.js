@@ -1,6 +1,7 @@
 // The freshness monitor uses the event time for glucose readings and the
 // server creation time for the remaining Nightscout collections, matching the
-// former MongoDB monitor.
+// former MongoDB monitor. Every column must be indexed: the monitor polls
+// every ten seconds, so a table scan here is a constant load on Postgres.
 export const MONITORED_COLLECTIONS = [
   { collection: 'entries', column: 'date' },
   { collection: 'heartrate', column: 'created_at' },
@@ -24,32 +25,18 @@ export async function latestCollectionUpdates (pool) {
   }));
 }
 
-/** Report a snapshot to New Relic, preserving the former monitor's names. */
-export function reportFreshness (newrelic, updates, previous = new Map(), now = Date.now()) {
+/**
+ * Report a snapshot as Netdata StatsD gauges. The log gets a line only when a
+ * collection changes, so the journal shows when each one last updated without
+ * repeating the gauges every few seconds.
+ */
+export function reportFreshness (metrics, updates, previous = new Map(), now = Date.now()) {
   for (const { collection, timestamp } of updates) {
-    if (timestamp === null) {
-      console.log(`${collection} is empty`);
-      continue;
-    }
-
-    const date = new Date(timestamp);
-    const delay = now - timestamp;
-    console.log(`${collection}_datetime ${date.toISOString()}`);
-    console.log(`${collection}_delay_ms ${delay}`);
-    newrelic.recordMetric(`nightscout_${collection}_last`, timestamp);
-    newrelic.recordMetric(`nightscout_${collection}_sync_delay`, delay);
-
-    if (previous.get(collection) === timestamp) continue;
-    newrelic.recordLogEvent({
-      message: `${collection} update ${date.toISOString()}`,
-      level: 'INFO',
-      timestamp,
-    });
-    newrelic.recordCustomEvent(`nightscout:update:${collection}`, {
-      time: timestamp,
-      timeStr: date.toISOString(),
-    });
+    if (timestamp !== null) metrics.gauge(`loopk.${collection}_sync_delay_seconds`, (now - timestamp) / 1000);
+    if (previous.has(collection) && previous.get(collection) === timestamp) continue;
     previous.set(collection, timestamp);
+    if (timestamp === null) console.log(`${collection} is empty`);
+    else console.log(`${collection} update ${new Date(timestamp).toISOString()}, ${Math.round((now - timestamp) / 1000)}s ago`);
   }
   return previous;
 }

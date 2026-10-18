@@ -9,6 +9,7 @@ import { createApi2 } from './api2/index.js';
 import { createApi3 } from './api3/index.js';
 import { createSessionRoutes } from './web/session.js';
 import { Following } from './sync/following.js';
+import { logRequests } from './monitoring/requests.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -41,12 +42,13 @@ export async function checkSchema (pool) {
   }
 }
 
-export function createApp (ctx) {
+export function createApp (ctx, { requestLog = false } = {}) {
   const app = express();
   app.disable('x-powered-by');
   // APIv3 sets its own ETag (W/"<srvModified>"), which clients use as a sync cursor.
   app.set('etag', false);
   app.set('trust proxy', true);
+  if (requestLog) app.use(logRequests());
   app.use(cookieParser());
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');

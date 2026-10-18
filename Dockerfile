@@ -20,4 +20,4 @@ COPY --chown=node:node migrations ./migrations
 
 USER node
 EXPOSE 8084
-CMD ["node", "--import", "newrelic/esm-loader.mjs", "--require", "newrelic", "--env-file-if-exists=.env", "src/server.js"]
+CMD ["node", "--env-file-if-exists=.env", "src/server.js"]

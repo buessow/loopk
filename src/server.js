@@ -3,9 +3,6 @@ import { loadConfig } from './config.js';
 import { createPool } from './db/index.js';
 import { createApp, createContext, checkSchema } from './app.js';
 import { attachSockets } from './sockets.js';
-import { forwardConsoleLogs } from './monitoring/console-logs.js';
-
-forwardConsoleLogs();
 
 const config = loadConfig();
 const pool = createPool(config.databaseUrl);
@@ -16,7 +13,7 @@ try {
   }
   await checkSchema(pool);
   const ctx = await createContext(config, pool);
-  const app = createApp(ctx);
+  const app = createApp(ctx, { requestLog: true });
   const server = http.createServer(app);
   attachSockets(server, ctx);
   if (config.follow && !config.follow.token) console.warn('FOLLOW_URL needs FOLLOW_TOKEN, an access token on that server: not following it.');
