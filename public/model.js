@@ -3,6 +3,7 @@
 
 export const MIN = 60000;
 export const HOUR = 3600000;
+export const DAY = 24 * HOUR;
 export const MGDL_PER_MMOL = 18;
 
 /**
@@ -70,6 +71,17 @@ export function heartRateSeries (docs) {
   return docs
     .map((d) => ({ t: docTime(d), v: num(d.beatsPerMinute ?? d.bpm ?? d.heartRate) }))
     .filter((p) => p.t != null && p.v > 0)
+    .sort((a, b) => a.t - b.t);
+}
+
+/** Carbs on board (g) reported by AAPS / Loop device-status records. */
+export function cobSeries (docs) {
+  return docs
+    .map((d) => ({
+      t: docTime(d),
+      v: num(d.openaps?.suggested?.COB ?? d.openaps?.enacted?.COB ?? d.loop?.cob?.cob),
+    }))
+    .filter((p) => p.t != null && p.v != null && p.v >= 0)
     .sort((a, b) => a.t - b.t);
 }
 
@@ -224,11 +236,35 @@ export function basalSegments ({ start, end, timeline, temps }) {
   return segs;
 }
 
+/**
+ * Delivered insulin per day over a trailing whole-day expansion of [start, end).
+ * Basal comes from the delivered basal segments; bolus comes from treatment
+ * events, so a basal-insulin treatment is never counted twice.
+ */
+export function insulinPerDay ({ start, end, basal, events }) {
+  const days = Math.ceil(Math.max(0, end - start) / DAY);
+  if (!days) return null;
+  const from = end - days * DAY;
+  const basalUnits = basal.reduce((total, segment) => {
+    const t0 = Math.max(from, segment.t0);
+    const t1 = Math.min(end, segment.t1);
+    return total + (t1 > t0 ? segment.rate * (t1 - t0) / HOUR : 0);
+  }, 0);
+  const bolusUnits = events.reduce((total, event) => (
+    event.type === 'bolus' && event.t >= from && event.t < end ? total + event.v : total
+  ), 0);
+  const total = basalUnits + bolusUnits;
+  return { from, days, basalUnits, bolusUnits, total, perDay: total / days };
+}
+
 // --- loop status ---------------------------------------------------------
 
 /** IOB / COB from the newest device status (AAPS/OpenAPS or Loop format). */
 export function onBoard (devicestatus, now = Date.now()) {
-  const ds = devicestatus.find((d) => d.openaps || d.loop);
+  const ds = devicestatus.reduce((latest, d) => {
+    if (!(d.openaps || d.loop)) return latest;
+    return !latest || (docTime(d) ?? -Infinity) > (docTime(latest) ?? -Infinity) ? d : latest;
+  }, null);
   if (!ds) return { iob: null, cob: null };
   const age = now - (docTime(ds) ?? 0);
   if (age > 30 * MIN) return { iob: null, cob: null };
@@ -252,5 +288,5 @@ export function buildModel ({ entries, treatments, heartrate, devicestatus, prof
   const switches = [...switchesBefore, ...treatments.filter((d) => /Profile Switch$/.test(d.eventType || ''))];
   const timeline = profileTimeline(profile, switches);
   const basal = basalSegments({ start, end, timeline, temps: tempBasals(treatments) });
-  return { start, end, g, hr, events, basal, ...onBoard(devicestatus, now) };
+  return { start, end, g, hr, cobSeries: cobSeries(devicestatus), events, basal, ...onBoard(devicestatus, now) };
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildModel, basalSegments, profileTimeline, tempBasals, eventSeries, gmiFromMmol, onBoard, timeInRanges, trendDirection, HOUR, MIN } from '../public/model.js';
+import { buildModel, basalSegments, cobSeries, profileTimeline, tempBasals, eventSeries, gmiFromMmol, insulinPerDay, onBoard, timeInRanges, trendDirection, DAY, HOUR, MIN } from '../public/model.js';
 
 const profile = {
   defaultProfile: 'P',
@@ -46,9 +46,41 @@ test('events: boluses, SMBs, carbs, BG checks in mmol', () => {
   assert.equal(ev[2].smb, true);
 });
 
+test('COB series uses the loop suggestion, then enacted or Loop status', () => {
+  assert.deepEqual(cobSeries([
+    { date: 3, openaps: { suggested: { COB: 12 }, enacted: { COB: 9 } } },
+    { date: 1, openaps: { enacted: { COB: 4 } } },
+    { date: 2, loop: { cob: { cob: 7 } } },
+    { date: 4, openaps: { suggested: { COB: -1 } } },
+  ]), [{ t: 1, v: 4 }, { t: 2, v: 7 }, { t: 3, v: 12 }]);
+});
+
+test('insulin per day expands a window to full days and includes delivered basal and boluses', () => {
+  const end = 2 * DAY;
+  const insulin = insulinPerDay({
+    start: end - 25 * HOUR,
+    end,
+    basal: [
+      { t0: 0, t1: DAY, rate: 1 },
+      { t0: DAY, t1: end, rate: 0.5 },
+    ],
+    events: [
+      { t: HOUR, type: 'bolus', v: 2 },
+      { t: DAY + HOUR, type: 'bolus', v: 4 },
+      { t: DAY + HOUR, type: 'carbs', v: 20 },
+      { t: end, type: 'bolus', v: 9 },
+    ],
+  });
+  assert.deepEqual(insulin, { from: 0, days: 2, basalUnits: 36, bolusUnits: 6, total: 42, perDay: 21 });
+});
+
 test('IOB/COB from recent AAPS device status only', () => {
   const now = Date.now();
   assert.deepEqual(onBoard([{ date: now - MIN, openaps: { iob: { iob: 1.234 }, suggested: { COB: 12 } } }], now), { iob: 1.234, cob: 12 });
+  assert.deepEqual(onBoard([
+    { date: now - 2 * MIN, openaps: { iob: { iob: 1 }, suggested: { COB: 9 } } },
+    { date: now - MIN, openaps: { iob: { iob: 1.5 }, suggested: { COB: 7 } } },
+  ], now), { iob: 1.5, cob: 7 });
   assert.deepEqual(onBoard([{ date: now - 2 * HOUR, openaps: { iob: { iob: 1 } } }], now), { iob: null, cob: null });
 });
 
@@ -87,5 +119,6 @@ test('buildModel converts mg/dL to mmol/L and windows events', () => {
   assert.deepEqual(m.g.map((p) => p.v), [5, 10]);
   assert.equal(m.events.length, 0);
   assert.equal(m.hr[0].v, 70);
+  assert.deepEqual(m.cobSeries, []);
   assert.ok(m.basal.length > 0);
 });
