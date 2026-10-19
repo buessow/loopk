@@ -1,6 +1,6 @@
 name: Build and deploy
 
-# Deploy by pushing to the production branch, e.g. `git push origin master:production`.
+# Deploy by pushing to the production branch, e.g. `git push origin main:production`.
 on:
   push:
     branches: [production]

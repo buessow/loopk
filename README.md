@@ -98,7 +98,7 @@ into the server's `.env` (see `outabout-infra`'s README, "Secrets").
 Deploy by pushing to the `production` branch:
 
 ```sh
-git push origin master:production
+git push origin main:production
 ```
 
 GitHub Actions builds the image, pushes it to `ghcr.io/buessow/loopk`,
