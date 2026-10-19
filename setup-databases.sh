@@ -27,6 +27,10 @@
 # transaction, and is recorded in that database's schema_migrations table, so a fresh database and
 # a live one reach the same schema by the same path.
 #
+# Before it applies migrations to production, the script dumps that database (pg_dump -Fc) to
+# $BACKUP_DIR (default ~/loopk-backups); if the dump fails, nothing is migrated. To restore:
+#   sudo -u postgres pg_restore --clean --if-exists -d loopk ~/loopk-backups/<file>.dump
+#
 # To exercise the script without touching anything real, point it at scratch databases:
 #   DEV_DB=dev_scratch TEST_DB=test_scratch ./setup-databases.sh --target=local
 #   psql -d postgres -c 'drop database dev_scratch' -c 'drop database test_scratch'
@@ -66,6 +70,7 @@ fi
 PROD_DB="${PROD_DB:-loopk}"
 TEST_DB="${TEST_DB:-loopk_test}"
 DEV_DB="${DEV_DB:-loopkdev}"
+BACKUP_DIR="${BACKUP_DIR:-$HOME/loopk-backups}"
 
 # "db:role" pairs this run manages.
 if [[ $TARGET == local ]]; then
@@ -79,8 +84,10 @@ fi
 # plain psql on Homebrew/Postgres.app where whoever ran initdb is the superuser.
 if id postgres >/dev/null 2>&1; then
   LOCAL_SUPERUSER=(sudo -u postgres psql)
+  LOCAL_PG_DUMP=(sudo -u postgres pg_dump)
 else
   LOCAL_SUPERUSER=(psql)
+  LOCAL_PG_DUMP=(pg_dump)
 fi
 
 # ON_ERROR_STOP matters: without it psql reports an error and keeps going.
@@ -100,8 +107,21 @@ query() {  # query <db>  (SQL on stdin, unaligned tuples out)
   fi
 }
 
+# Production is only ever migrated with --target=local (see --with-prod), so the dump is local too.
+backup() {  # backup <db> <first pending migration>
+  local file
+  file="$BACKUP_DIR/$1-$(date -u +%Y%m%dT%H%M%SZ)-before-${2%.sql}.dump"
+  mkdir -p -m 700 "$BACKUP_DIR"
+  echo "  [$TARGET] $1 -> $file"
+  if ! "${LOCAL_PG_DUMP[@]}" -Fc -d "$1" >"$file"; then
+    rm -f "$file"
+    echo "Backup of $1 failed; no migrations applied." >&2
+    exit 1
+  fi
+}
+
 apply_migrations() {  # apply_migrations <db>
-  local db=$1 applied file name
+  local db=$1 applied file name backed_up=0
   run_sql "$db" <<'SQL'
 create table if not exists schema_migrations (
   filename   text primary key,
@@ -113,6 +133,10 @@ SQL
     [[ -e "$file" ]] || continue
     name=$(basename "$file")
     grep -qxF "$name" <<<"$applied" && continue
+    if [[ $db == "$PROD_DB" && $WITH_PROD -eq 1 && $backed_up -eq 0 ]]; then
+      backup "$db" "$name"
+      backed_up=1
+    fi
     echo "  [$TARGET] $db <- migrations/$name"
     { echo 'begin;'; cat "$file"; printf "\ninsert into schema_migrations (filename) values ('%s');\n" "$name"; echo 'commit;'; } \
       | run_sql "$db"

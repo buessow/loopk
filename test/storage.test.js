@@ -13,7 +13,7 @@ after(() => s.close());
 
 const PG_TYPES = {
   text: 'text', double: 'double precision', bigint: 'bigint', int: 'integer',
-  bool: 'boolean', ts: 'timestamp with time zone', textArray: 'ARRAY', json: 'jsonb', jsonString: 'jsonb',
+  bool: 'boolean', ts: 'timestamp with time zone', ms: 'timestamp with time zone', textArray: 'ARRAY', json: 'jsonb', jsonString: 'jsonb',
 };
 
 test('schema.js matches the tables', async () => {
@@ -109,6 +109,25 @@ test('values of the wrong type and nulls are kept in extra', () => {
   assert.deepEqual(extra, { sgv: '120', direction: null, date: 1.5 });
 });
 
+test('date and server times are stored as timestamps and read back as milliseconds', async () => {
+  const doc = { ...common('e-ms'), date: 1760000000123, srvCreated: 1760000000456, srvModified: 1760000000789, sgv: 100 };
+  assert.deepEqual(await roundTrip('entries', doc), doc);
+  const { rows: [row] } = await s.ctx.pool.query("SELECT date, srv_created, srv_modified FROM entries WHERE identifier = 'e-ms'");
+  assert.deepEqual(row, {
+    date: new Date('2025-10-09T08:53:20.123Z'),
+    srv_created: new Date('2025-10-09T08:53:20.456Z'),
+    srv_modified: new Date('2025-10-09T08:53:20.789Z'),
+  });
+});
+
+test('dates a timestamp cannot hold are kept in extra', () => {
+  for (const date of [1.5, 9e15, -1e14, '1760000000000']) {
+    const { values, extra } = docToColumns(SCHEMAS.entries, { identifier: 'e', date });
+    assert.deepEqual(values, { identifier: 'e' });
+    assert.deepEqual(extra, { date });
+  }
+});
+
 test('patch merges into the stored document', async () => {
   const store = new CollectionStore(s.ctx.pool, 'treatments');
   await store.insert({ ...common('t2'), eventType: 'Note', notes: 'a', foo: 1 });
@@ -179,4 +198,7 @@ test('number filters on integer columns keep fractional values exact', async () 
   assert.deepEqual(await match([{ field: 'date', operator: 'gt', value: 999.5 }]), ['hr-fraction']);
   assert.deepEqual(await match([{ field: 'date', operator: 'gt', value: 1000.5 }]), []);
   assert.deepEqual(await match([{ field: 'date', operator: 'in', value: '1000|2000' }]), ['hr-fraction']);
+  assert.deepEqual(await match([{ field: 'date', operator: 'nin', value: '1000|2000' }]), []);
+  assert.deepEqual(await match([{ field: 'date', operator: 're', value: '^10+$' }]), ['hr-fraction']);
+  assert.deepEqual(await match([{ field: 'date', operator: 'eq', value: '1000' }]), []);
 });

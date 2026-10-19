@@ -3,6 +3,7 @@
 // Each field is [documentPath, column, type]. Types:
 //   text, double, bigint, int, bool  scalar columns
 //   ts                               ISO timestamp string <-> timestamptz
+//   ms                               epoch milliseconds <-> timestamptz
 //   textArray                        list of strings <-> text[]
 //   json                             jsonb, for parts without a fixed structure
 //   jsonString                       a JSON document sent as a string <-> jsonb
@@ -11,15 +12,15 @@
 
 const COMMON = [
   ['identifier', 'identifier', 'text'],
-  ['date', 'date', 'bigint'],
+  ['date', 'date', 'ms'],
   ['utcOffset', 'utc_offset', 'int'],
   ['created_at', 'created_at', 'ts'],
   ['app', 'app', 'text'],
   ['device', 'device', 'text'],
   ['subject', 'subject', 'text'],
   ['modifiedBy', 'modified_by', 'text'],
-  ['srvCreated', 'srv_created', 'bigint'],
-  ['srvModified', 'srv_modified', 'bigint'],
+  ['srvCreated', 'srv_created', 'ms'],
+  ['srvModified', 'srv_modified', 'ms'],
   ['isValid', 'is_valid', 'bool'],
   ['isReadOnly', 'is_read_only', 'bool'],
 ];

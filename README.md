@@ -105,7 +105,12 @@ GitHub Actions builds the image, pushes it to `ghcr.io/buessow/loopk`,
 then SSHes to the server and runs `outabout-infra`'s
 `services/loopk/deploy.sh`, which pulls the image, applies all migrations
 (shipped in the image) before the new container starts, restarts the
-containers, and checks the backend endpoint. The compose file, the `.env`
+containers, and checks the backend endpoint. When migrations are pending,
+`setup-databases.sh` first dumps the production database to
+`~/loopk-backups/` on the server (restore with
+`sudo -u postgres pg_restore --clean --if-exists -d loopk <file>`). A
+migration that rewrites large tables locks them until it commits, so the
+running app waits during that time. The compose file, the `.env`
 template and the Apache vhost live in `outabout-infra`. The workflow needs
 the repo secrets `DEPLOY_HOST`, `DEPLOY_USER` and `DEPLOY_SSH_KEY`; on the
 server, that key is restricted to the deploy script by a forced command in

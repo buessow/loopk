@@ -6,6 +6,13 @@ const quote = (col) => `"${col}"`;
 const COMPARATORS = { eq: '=', gt: '>', gte: '>=', lt: '<', lte: '<=' };
 const FIELD_RE = /^[A-Za-z0-9_$@-]+(\.[A-Za-z0-9_$@-]+)*$/;
 const ISO_SQL = (col) => `to_char(${col} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+// Epoch milliseconds <-> timestamptz in SQL; exact for integers, and keeps the
+// microseconds of fractional values, so comparisons match the numbers'.
+const MS_TO_TS_SQL = (ms) => `(timestamptz 'epoch' + ${ms} * interval '1 millisecond')`;
+const TS_TO_MS_SQL = (col) => `(extract(epoch FROM ${col}) * 1000)::bigint`;
+// The epoch milliseconds a JavaScript Date holds from year 1 on (timestamptz starts at 4713 BC).
+const MIN_MS = -62135596800000;
+const MAX_MS = 8.64e15;
 
 // --- document paths ----------------------------------------------------------
 
@@ -63,6 +70,7 @@ function toColumn (type, v) {
       // Only timestamps that render back identically, so documents round-trip.
       return !Number.isNaN(d.getTime()) && d.toISOString() === v ? d : undefined;
     }
+    case 'ms': return Number.isSafeInteger(v) && v >= MIN_MS && v <= MAX_MS ? new Date(v) : undefined;
     case 'textArray': return Array.isArray(v) && v.every((x) => typeof x === 'string') ? v : undefined;
     case 'json': return JSON.stringify(v);
     case 'jsonString': {
@@ -80,6 +88,7 @@ function toColumn (type, v) {
 
 function fromColumn (type, v) {
   if (type === 'ts') return v.toISOString();
+  if (type === 'ms') return v.getTime();
   if (type === 'jsonString') return JSON.stringify(v);
   return v;
 }
@@ -372,6 +381,9 @@ class QueryBuilder {
       } else if (f.type === 'number') {
         const numbers = values.map(Number).filter(Number.isFinite);
         match = `${f.sql} = ANY(${this.param(numbers)}::${numberCast(f, numbers)}[])`;
+      } else if (f.type === 'ms') {
+        const numbers = values.map(Number).filter(Number.isFinite);
+        match = `${f.sql} = ANY(ARRAY(SELECT ${MS_TO_TS_SQL('ms')} FROM unnest(${this.param(numbers)}::double precision[]) ms))`;
       } else if (f.type === 'ts') {
         match = `${f.sql} = ANY(${this.param(values.filter((v) => !Number.isNaN(Date.parse(v))))}::timestamptz[])`;
       } else {
@@ -384,6 +396,7 @@ class QueryBuilder {
       const re = this.param(String(value));
       if (f.type === 'jsonb') return `(jsonb_typeof(${f.sql}) = 'string' AND ${f.sql} #>> '{}' ~ ${re})`;
       if (f.type === 'ts') return `${ISO_SQL(f.sql)} ~ ${re}`;
+      if (f.type === 'ms') return `${TS_TO_MS_SQL(f.sql)}::text ~ ${re}`;
       return `${f.sql}::text ~ ${re}`;
     }
 
@@ -406,6 +419,7 @@ class QueryBuilder {
   /** The value as a typed parameter, or null if no value of the column can match it (Mongo semantics). */
   typedParam ({ type, ...f }, value) {
     if (type === 'number') return typeof value === 'number' ? `${this.param(value)}::${numberCast(f, [value])}` : null;
+    if (type === 'ms') return typeof value === 'number' && Number.isFinite(value) ? MS_TO_TS_SQL(`${this.param(value)}::double precision`) : null;
     if (type === 'boolean') return typeof value === 'boolean' ? `${this.param(value)}::boolean` : null;
     if (type === 'ts') return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? `${this.param(value)}::timestamptz` : null;
     return typeof value === 'string' ? `${this.param(value)}::text` : null;
@@ -561,6 +575,6 @@ export class CollectionStore {
 
   async lastModified () {
     const { rows } = await this.pool.query(`SELECT max(srv_modified) AS m FROM ${this.table}`);
-    return rows[0].m ?? null;
+    return rows[0].m ? rows[0].m.getTime() : null;
   }
 }
