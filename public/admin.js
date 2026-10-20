@@ -28,8 +28,23 @@ async function loadTokens () {
   $('tokens').innerHTML = list.map((s) => `<tr>
     <td>${esc(s.name)}</td><td>${s.canUploadModel ? 'Upload model' : s.canWrite ? 'Read &amp; write' : 'Read'}</td>
     <td class="mono">${esc(s.accessToken)}</td>
-    <td style="text-align:right"><button class="btn btn-ghost" data-del-token="${esc(s._id)}" data-name="${esc(s.name)}">Delete</button></td>
+    <td style="text-align:right;white-space:nowrap"><button class="btn btn-ghost" data-copy-token="${esc(s.accessToken)}" aria-label="Copy the token of ${esc(s.name)}">Copy</button><button class="btn btn-ghost" data-del-token="${esc(s._id)}" data-name="${esc(s.name)}">Delete</button></td>
   </tr>`).join('') || '<tr><td colspan="4" class="text-muted">No tokens yet.</td></tr>';
+}
+
+/** Copies text; the Clipboard API needs a secure context, so fall back to a selection. */
+async function copyText (text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.append(area);
+  area.select();
+  const ok = document.execCommand('copy');
+  area.remove();
+  if (!ok) throw new Error('Copying is not supported in this browser');
 }
 
 async function loadUsers () {
@@ -77,6 +92,15 @@ document.addEventListener('change', async (e) => {
 });
 
 document.addEventListener('click', async (e) => {
+  const c = e.target.closest('[data-copy-token]');
+  if (c) {
+    try {
+      await copyText(c.dataset.copyToken);
+      c.textContent = 'Copied';
+      setTimeout(() => { c.textContent = 'Copy'; }, 1500);
+    } catch (err) { showError(err); }
+    return;
+  }
   const t = e.target.closest('[data-del-token]');
   const u = e.target.closest('[data-del-user]');
   try {

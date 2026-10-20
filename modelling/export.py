@@ -191,8 +191,12 @@ def upload(url, model):
     if not token:
         raise SystemExit('Set LOOPK_MODEL_TOKEN to an "Upload model" access token (Access page).')
     url = url.rstrip('/')
-    with urllib.request.urlopen(f'{url}/api/v2/authorization/request/{token}') as r:
-        jwt = json.load(r)['token']
+    try:
+        with urllib.request.urlopen(f'{url}/api/v2/authorization/request/{token}') as r:
+            jwt = json.load(r)['token']
+    except urllib.error.HTTPError as err:
+        raise SystemExit(f'the server does not know LOOPK_MODEL_TOKEN ({err.code}); a token created with '
+                         f'`npm run token` only counts after the server restarts')
     req = urllib.request.Request(f'{url}/api/prediction/model', data=json.dumps(model).encode(), method='PUT',
                                  headers={'Authorization': f'Bearer {jwt}', 'Content-Type': 'application/json'})
     try:
