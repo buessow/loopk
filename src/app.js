@@ -8,6 +8,7 @@ import { Auth } from './auth/index.js';
 import { createApi2 } from './api2/index.js';
 import { createApi3 } from './api3/index.js';
 import { createSessionRoutes } from './web/session.js';
+import { createPredictionRoutes } from './predict/routes.js';
 import { Following } from './sync/following.js';
 import { logRequests } from './monitoring/requests.js';
 
@@ -58,6 +59,7 @@ export function createApp (ctx, { requestLog = false } = {}) {
 
   app.use('/api/v3', createApi3(ctx));
   app.use('/api/v2', createApi2(ctx));
+  app.use('/api/prediction', createPredictionRoutes(ctx));
   app.use('/api', (req, res, next) => (req.path.startsWith('/session') || req.path.startsWith('/admin') ? next() : res.status(404).json({ status: 404, message: 'Not found' })));
   app.use(createSessionRoutes(ctx));
 

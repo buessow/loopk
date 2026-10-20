@@ -199,14 +199,16 @@ function fetchSwitchBefore (t) {
 async function loadRecent ({ refreshCache = true } = {}) {
   const now = Date.now();
   const from = now - RECENT;
-  const [series, devicestatus, profiles, switchesBefore, lastEntry] = await Promise.all([
+  const [series, devicestatus, profiles, switchesBefore, lastEntry, prediction] = await Promise.all([
     fetchSeries(from, null),
     api('/api/v3/devicestatus?sort$desc=created_at&limit=3'),
     api('/api/v3/profile?sort$desc=date&limit=1'),
     fetchSwitchBefore(from),
     api('/api/v3/entries?type=sgv&sort$desc=date&limit=1&fields=identifier,date,srvModified,sgv,direction,type'),
+    // Optional: the page works without it.
+    api('/api/prediction').catch(() => null),
   ]);
-  state.recent = { ...series, devicestatus, profile: profiles[0], switchesBefore, lastEntry: lastEntry[0] };
+  state.recent = { ...series, devicestatus, profile: profiles[0], switchesBefore, lastEntry: lastEntry[0], prediction };
   // When the server last received anything from the phone, with or without glucose.
   let lastUpload = null;
   for (const d of [...devicestatus, ...lastEntry, ...series.entries, ...series.treatments, ...series.heartrate]) {
@@ -391,6 +393,23 @@ function renderTrend (id, current, previous, decimals, name) {
   el.setAttribute('aria-label', `${name} ${word} from the previous equal period`);
 }
 
+/** Predicted glucose for the reading shown, while it is current (GET /api/prediction). */
+function renderForecast (last, stale) {
+  const el = $('forecast');
+  const p = state.recent.prediction;
+  if (stale || !last || !p?.available || Math.abs(p.date - last.t) > MIN) {
+    el.hidden = true;
+    return;
+  }
+  const v = (sgv) => fmt(sgv / MGDL_PER_MMOL);
+  el.hidden = false;
+  el.innerHTML = 'Predicted ' + p.predictions.map((x) => `${x.minutes} min <b>${v(x.sgv)}</b>`).join(' · ')
+    + (p.lowWarning ? ' <span class="tag tag-warn">Low likely within 30 min</span>' : '');
+  el.title = 'From the last 2 h of glucose and the time of day. 80% range: '
+    + p.predictions.map((x) => `${x.minutes} min ${v(x.low)}–${v(x.high)}`).join(', ')
+    + `. Chance of a low within 30 min: ${Math.round(p.lowProbability30 * 100)}%.`;
+}
+
 function renderStats () {
   const N = state.now;
   const G = N.g.filter((p) => p.t >= N.start);
@@ -403,6 +422,7 @@ function renderStats () {
 
   if (!last) {
     $('glucoseKicker').textContent = 'Glucose now';
+    $('forecast').hidden = true;
     $('bgNow').textContent = '–';
     $('bgNow').className = 'bg-now';
     $('delta').textContent = 'No glucose readings';
@@ -436,6 +456,7 @@ function renderStats () {
     } else {
       $('delta').textContent = ' ';
     }
+    renderForecast(last, stale);
   }
 
   // Time in ranges and mean cover the window shown in the chart; trends use

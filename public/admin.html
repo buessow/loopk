@@ -17,10 +17,10 @@
 
   <section style="display:flex;flex-direction:column;gap:var(--space-3)">
     <h3 style="margin:0">Access tokens</h3>
-    <p class="text-muted" style="margin:0">For apps and devices: enter the token as the NSClient “access token” in AAPS, which needs read &amp; write. Read is enough for apps that only display data.</p>
+    <p class="text-muted" style="margin:0">For apps and devices: enter the token as the NSClient “access token” in AAPS, which needs read &amp; write. Read is enough for apps that only display data. Upload model is for <code>modelling/export.py</code>: it can only upload glucose prediction models, not read or change data.</p>
     <form class="row" id="tokenForm">
       <div class="field"><label for="tokenName">Name</label><input class="input" id="tokenName" required placeholder="aaps-phone"></div>
-      <div class="field"><label>Access</label><div class="seg"><label class="seg-opt"><input type="radio" name="tokenAccess" value="read">Read</label><label class="seg-opt"><input type="radio" name="tokenAccess" value="write" checked>Read &amp; write</label></div></div>
+      <div class="field"><label>Access</label><div class="seg"><label class="seg-opt"><input type="radio" name="tokenAccess" value="read">Read</label><label class="seg-opt"><input type="radio" name="tokenAccess" value="write" checked>Read &amp; write</label><label class="seg-opt"><input type="radio" name="tokenAccess" value="model">Upload model</label></div></div>
       <button class="btn btn-primary" type="submit">Create token</button>
     </form>
     <div class="blueprint table-wrap"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>

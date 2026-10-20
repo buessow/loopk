@@ -6,8 +6,13 @@ const SESSION_COOKIE = 'loopk_session';
 
 // What an access token may do: read, or read and write (AAPS). Neither
 // includes managing access, which is for admins signed in to the web UI.
+// Model upload tokens (modelling/export.py) may only manage prediction
+// models, which are outside `api` so that write tokens do not get it.
 const TOKEN_READ = ['api:*:read'];
 const TOKEN_WRITE = ['api'];
+const TOKEN_MODEL = ['model'];
+/** The permission uploading a prediction model requires. */
+export const UPLOAD_MODEL = 'model:upload';
 // People read; admins may do everything.
 const PERSON = ['api:*:read'];
 const ADMIN = ['*'];
@@ -45,11 +50,13 @@ export class Auth {
   }
 
   async reload () {
-    const { rows } = await this.pool.query('SELECT id, name, can_write, notes, access_token, created_at FROM subjects ORDER BY name');
+    const { rows } = await this.pool.query(
+      'SELECT id, name, can_write, can_upload_model, notes, access_token, created_at FROM subjects ORDER BY name');
     this.subjects = rows;
   }
 
   static subjectPermissions (subject) {
+    if (subject.can_upload_model) return TOKEN_MODEL;
     return subject.can_write ? TOKEN_WRITE : TOKEN_READ;
   }
 
@@ -69,19 +76,20 @@ export class Auth {
     return this.subjects.find((s) => timingSafeEqualStr(s.access_token, accessToken)) || null;
   }
 
-  async createSubject ({ name, canWrite = false, notes = null }) {
+  async createSubject ({ name, canWrite = false, canUploadModel = false, notes = null }) {
     const token = Auth.generateAccessToken(name);
     const { rows } = await this.pool.query(
-      `INSERT INTO subjects (name, can_write, notes, access_token) VALUES ($1, $2, $3, $4) RETURNING *`,
-      [name, canWrite, notes, token]);
+      `INSERT INTO subjects (name, can_write, can_upload_model, notes, access_token) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [name, canWrite, canUploadModel, notes, token]);
     await this.reload();
     return rows[0];
   }
 
-  async updateSubject (id, { name, canWrite, notes }) {
+  async updateSubject (id, { name, canWrite, canUploadModel, notes }) {
     const { rows } = await this.pool.query(
-      `UPDATE subjects SET name = coalesce($2, name), can_write = coalesce($3, can_write), notes = coalesce($4, notes)
-       WHERE id = $1 RETURNING *`, [id, name ?? null, canWrite ?? null, notes ?? null]);
+      `UPDATE subjects SET name = coalesce($2, name), can_write = coalesce($3, can_write),
+              can_upload_model = coalesce($4, can_upload_model), notes = coalesce($5, notes)
+       WHERE id = $1 RETURNING *`, [id, name ?? null, canWrite ?? null, canUploadModel ?? null, notes ?? null]);
     await this.reload();
     return rows[0] || null;
   }

@@ -26,7 +26,7 @@ function showError (err) {
 async function loadTokens () {
   const list = await call('GET', '/api/v2/authorization/subjects');
   $('tokens').innerHTML = list.map((s) => `<tr>
-    <td>${esc(s.name)}</td><td>${s.canWrite ? 'Read &amp; write' : 'Read'}</td>
+    <td>${esc(s.name)}</td><td>${s.canUploadModel ? 'Upload model' : s.canWrite ? 'Read &amp; write' : 'Read'}</td>
     <td class="mono">${esc(s.accessToken)}</td>
     <td style="text-align:right"><button class="btn btn-ghost" data-del-token="${esc(s._id)}" data-name="${esc(s.name)}">Delete</button></td>
   </tr>`).join('') || '<tr><td colspan="4" class="text-muted">No tokens yet.</td></tr>';
@@ -46,8 +46,10 @@ async function loadUsers () {
 $('tokenForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
-    const canWrite = document.querySelector('input[name=tokenAccess]:checked').value === 'write';
-    await call('POST', '/api/v2/authorization/subjects', { name: $('tokenName').value, canWrite });
+    const access = document.querySelector('input[name=tokenAccess]:checked').value;
+    await call('POST', '/api/v2/authorization/subjects', {
+      name: $('tokenName').value, canWrite: access === 'write', canUploadModel: access === 'model',
+    });
     $('tokenName').value = '';
     await loadTokens();
   } catch (err) { showError(err); }

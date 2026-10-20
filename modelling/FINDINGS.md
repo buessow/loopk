@@ -555,10 +555,12 @@ compared for these horizons (test MAE in mg/dL):
 - **Low warning** ("low likely within 30 min"), at P ≥ 0.4: 90% of lows are
   announced, 61% at least 15 minutes ahead, with about 14 false alarms a
   week. At 0.3, 94% are announced, but with 19 false alarms a week.
-- `modelling/export.py` trains it and writes `src/predict/model.json`. It
-  also writes a fixture of synthetic readings with the Python outputs. The
-  server test `test/predict.test.js` checks that the server rebuilds the
-  same inputs and outputs (within 0.001 mg/dL).
+- `modelling/export.py` trains it and uploads it (`--upload`) with an
+  "Upload model" access token. The server stores models in the database and
+  uses the newest. Every model bundles checks: synthetic readings with the
+  Python outputs. The server refuses an upload whose checks don't come out
+  the same within 0.001 mg/dL. The server test `test/predict.test.js` runs
+  the same comparison on a random network of the same shape.
 
 ## Caveats
 

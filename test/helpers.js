@@ -7,7 +7,7 @@ import { attachSockets } from '../src/sockets.js';
 const DATA_TABLES = [
   'entries', 'treatments', 'treatment_profiles', 'treatment_profile_schedules',
   'devicestatus', 'devicestatus_predictions', 'profile', 'profile_stores', 'profile_store_schedules',
-  'food', 'settings', 'heartrate', 'subjects', 'users', 'follow_state', 'follow_config',
+  'food', 'settings', 'heartrate', 'subjects', 'users', 'follow_state', 'follow_config', 'prediction_models',
 ];
 
 /**
@@ -41,8 +41,8 @@ export async function startServer (env = {}) {
 }
 
 /** Creates an access token and exchanges it for a JWT, like AAPS does. */
-export async function tokenFor (ctx, name, { canWrite = true } = {}) {
-  const subject = await ctx.auth.createSubject({ name, canWrite });
+export async function tokenFor (ctx, name, { canWrite = true, canUploadModel = false } = {}) {
+  const subject = await ctx.auth.createSubject({ name, canWrite, canUploadModel });
   const { token } = ctx.auth.authorize(subject.access_token);
   return { accessToken: subject.access_token, jwt: token };
 }
