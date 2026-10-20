@@ -17,6 +17,12 @@ uv run python usual.py                   # how predictable eating and insulin de
 uv run python sensitivity.py             # basal drift and ISF against AAPS's values
 uv run python simulate.py                # glucose simulated with AAPS's ISF and CR vs the sensor
 uv run python curve.py                   # insulin action curve fitted to the glucose response
+uv run python benchmark.py               # standard scorecard of every candidate model
+uv run python benchmark.py --candidates server-level   # ... of some
+uv run python synthetic.py               # synthetic insulin data: accuracy and dose response
+uv run python corrections.py             # measured effect of a correction bolus
+uv run python periods.py                 # bias by test period, with and without calibration
+uv run python architectures.py           # network shapes
 uv run python export.py                  # retrain and export the server model
 uv run python upload.py --url https://loopk.robertbuessow.com --token <token>   # upload results/model.json
 uv run pytest
@@ -29,6 +35,13 @@ uv run pytest
 - `glupred/features.py` — feature matrix and targets. Inputs use only data up
   to the prediction time; insulin and carbs enter as the activity of doses
   already given.
+- `glupred/synthetic.py` — synthetic samples: a real sample with a dose
+  added or removed, inputs and glucose changed as if it had been logged.
+- `glupred/nn.py` — the MLP (expected glucose, percentiles, event
+  probabilities), calibrated on validation data.
+- `glupred/benchmark.py` — the standard scorecard: accuracy, by situation,
+  warnings per episode, response to insulin, carbs and exercise,
+  stability, band, drift.
 - `glupred/baselines.py`, `glupred/metrics.py` — persistence, linear trend,
   AAPS's own predicted curves; MAE/RMSE, Clarke zones, low detection.
 - `train.py` — time-based split (train → 2025-01, validation → 2025-07, test
@@ -38,6 +51,11 @@ uv run pytest
 - `sensitivity.py`, `simulate.py`, `curve.py` — checks of AAPS's basal, ISF,
   carb ratio and insulin curve against the sensor (`glupred/sensitivity.py`,
   `glupred/simulate.py`); reports in `results/`.
+- `benchmark.py` — trains the candidates in `CANDIDATES` and compares their
+  scorecards with "no change" and AAPS (`results/benchmark.md`). Use it for
+  every model test.
+- `synthetic.py`, `corrections.py`, `periods.py`, `architectures.py` —
+  synthetic insulin data, correction effect, bias by period, network shapes.
 - `export.py` — trains the server model, writes `results/model.json` (not
   committed) and the parity fixture `../test/fixtures/prediction.json`
   (synthetic readings, random network). `--upload [URL]` also uploads it.

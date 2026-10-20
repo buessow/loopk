@@ -1,10 +1,15 @@
 # Glucose prediction: findings
 
-Status as of 2026-10-19. Offline study on loopk's data (one person, AAPS
+Status as of 2026-10-20. Offline study on loopk's data (one person, AAPS
 closed loop, 2019-04 – 2026-10). Reproduce with `uv run python train.py`
 (60-minute model comparison), `uv run python scenarios.py` (4-hour model,
-dosing, eat-now and high scenarios) and `uv run python whatif.py` (forecasts
-under an insulin plan); full tables land in `results/`. Figures
+dosing, eat-now and high scenarios), `uv run python whatif.py` (forecasts
+under an insulin plan), `uv run python benchmark.py` (the standard
+benchmark of every model), `uv run python synthetic.py` (synthetic insulin
+data), `uv run python corrections.py` (the measured effect of a correction),
+`uv run python periods.py` (bias by test period) and
+`uv run python architectures.py` (network shapes); full tables land in
+`results/`. Figures
 are from the latest `scenarios.py` run unless noted; the model's figures vary
 by a few tenths of a mg/dL, and its warning operating points by a few
 percentage points, between training runs.
@@ -47,6 +52,18 @@ percentage points, between training runs.
   above 120 when rising, above 160 when falling slowly, and at night above
   120), which explain 95% of them. The amounts, and AAPS's own SMBs and temp
   basals, are hard to predict.
+- **Standard benchmark** (all models on the same test slots, see "Standard
+  benchmark"): at 30 minutes the networks' MAE is 17–18 mg/dL, AAPS's IOB
+  curve 21 and "no change" 22. At 7 alarms a week, the networks catch about
+  half of the lows (three out of four alarms correct), AAPS's curves at most
+  two fifths.
+- **Synthetic insulin data** fixes the "more insulin, higher glucose"
+  pattern the closed loop teaches (see "Synthetic insulin data"): 2 more
+  units now lower the forecast in 99.9% of test samples, by close to the
+  measured 11.7 mg/dL per unit, at a cost of about 0.2 mg/dL of accuracy.
+- **The server** now uses glucose, its level over the last days, insulin
+  and carbs, trained with synthetic data: MAE 17.2 at 30 minutes, against
+  17.7 for glucose alone.
 - Highs (above 180) happen about 3 times a day, mostly after meals. No
   method predicts a rise before it starts. Once glucose is rising, high
   warnings work well, and while coming down from a high the model predicts
@@ -92,6 +109,15 @@ percentage points, between training runs.
 - **"If nothing is eaten":** training ignores glucose targets that come after
   any new carbs (logged or assumed), so the glucose outputs predict what
   happens without eating.
+- **Glucose level** (benchmark and server models): the mean glucose of the
+  last 1, 3 and 7 days, which tracks slow changes in sensitivity and keeps
+  the bias per half-year within about ±2.5 mg/dL.
+- **Calibration:** a network trained on log(g[t+h] / g[t]) predicts the
+  geometric mean, which lies below the mean. After training, a shift per
+  horizon (log of the mean actual / predicted on validation data) is added
+  to the output bias (`glupred/nn.py`). It brought the mean |bias| at 30
+  minutes over rolling test periods from 2.7 to 0.6 mg/dL (with the level
+  inputs).
 - **Outputs:** expected glucose (trained on log(g[t+h] / g[t]), so errors
   count relative to the glucose level), its 10th, 25th, 75th and 90th
   percentiles, and probabilities of going below target within 1, 2, 3 and 4
@@ -657,6 +683,341 @@ compared for these horizons (test MAE in mg/dL):
   Python outputs. The server refuses an upload whose checks don't come out
   the same within 0.001 mg/dL. The server test `test/predict.test.js` runs
   the same comparison on a random network of the same shape.
+
+## Standard benchmark
+
+Every model test is scored the same way (`benchmark.py`, see AGENTS.md):
+train 2019-05 – 2024-12, early stopping and calibration on 2025-01 – 2025-06,
+test 2025-07 – 2026-10. Accuracy is measured on the 95,902 test slots where AAPS
+made an IOB curve reaching 2 h, so all methods are scored on the same moments.
+Warnings are counted on the whole test period: 641 lows (glucose below 70
+after at least 30 minutes above) and 231 highs (above 250 after at least 30
+minutes below). Figures are from the run of 2026-10-20; a retrained network
+moves by a few tenths of a mg/dL.
+
+**The models:**
+
+- **no change:** glucose stays at the latest reading.
+- **linear trend 15 min:** a straight line through the last 15 minutes,
+  extended.
+- **AAPS IOB, display curve, ZT, UAM:** AAPS's recorded curves (see
+  "Comparison methods"). The display curve is COB while carbs are on board,
+  else UAM, else IOB. UAM exists for only a third of the slots and is scored
+  on those.
+- **ridge, gbm:** ridge regression and gradient boosting on all inputs (2 h of
+  glucose, insulin and carb activity, IOB, COB, profile basal, heart rate,
+  time of day), 2 h ahead.
+- **server:** the MLP the server ran until now: 2 h of glucose and the time
+  of day, 30 minutes ahead.
+- **server-level:** the same, plus the mean glucose of the last 1, 3 and 7
+  days.
+- **server-insulin-synthetic:** server-level plus insulin (activity in the
+  past and committed for the next 30 minutes, IOB, profile basal), trained
+  with synthetic insulin copies (see "Synthetic insulin data").
+- **server-insulin-carbs-synthetic:** the same plus carbs (activity and COB,
+  including assumed rescue carbs). **This is the new server model.**
+- **all-level:** all inputs plus the glucose level, 2 h ahead, trained on
+  "if nothing more is eaten" targets.
+- **all-level-synthetic:** all-level with the synthetic insulin copies.
+
+All MLPs (the server and all-level models) have two layers of 128 and 64
+units and are calibrated (see Setup).
+
+### Accuracy
+
+Columns:
+
+- **MAE 15 / 30 / 60 / 120 min:** mean absolute error of the forecast at
+  that horizon, in mg/dL. Lower is better. The server models predict only
+  30 minutes ahead, so they have no 60- and 120-minute value.
+- **Bias 30 min:** mean of forecast minus actual at 30 minutes, in mg/dL.
+  Positive: the forecast is too high. Closer to 0 is better.
+- **Skill 30 min:** how much lower the 30-minute MAE is than "no change", in
+  percent. Higher is better; negative means worse than "no change".
+
+| Model | MAE 15 min | MAE 30 min | MAE 60 min | MAE 120 min | Bias 30 min | Skill 30 min % |
+|---|---|---|---|---|---|---|
+| no change | 12.7 | 22.4 | 35.7 | 42.8 | −2.1 | 0 |
+| linear trend 15 min | 13.0 | 27.0 | 58.1 | 111.5 | 5.8 | −20.6 |
+| AAPS IOB | 11.8 | 21.1 | 34.7 | 44.7 | −8.0 | 5.9 |
+| AAPS display curve | 11.8 | 21.7 | 37.2 | 47.9 | −5.9 | 3.0 |
+| AAPS ZT | 13.6 | 23.1 | 34.9 | 43.3 | −13.2 | −3.2 |
+| AAPS UAM | 11.6 | 23.4 | 42.6 | 53.1 | 2.3 | −4.4 |
+| ridge | 10.1 | 18.0 | 28.1 | 31.0 | −2.5 | 19.8 |
+| gbm | 9.6 | 16.8 | 25.9 | 29.7 | −3.2 | 24.8 |
+| server | 10.0 | 18.0 | – | – | −0.4 | 19.6 |
+| server-level | 9.9 | 17.7 | – | – | 0.2 | 20.9 |
+| server-insulin-synthetic | 9.9 | 17.8 | – | – | 2.3 | 20.7 |
+| **server-insulin-carbs-synthetic** | **9.7** | **17.2** | – | – | **0.4** | **23.2** |
+| all-level | 9.6 | 16.8 | 26.0 | 30.4 | −2.0 | 25.0 |
+| all-level-synthetic | 9.6 | 17.0 | 26.2 | 30.1 | −2.1 | 24.2 |
+
+- The networks and gradient boosting are 20–25% better than "no change" at
+  30 minutes. AAPS's curves are within ±6% of it.
+- AAPS's curves predict too low (−6 to −13 mg/dL at 30 minutes), the
+  networks within ±2.5.
+- Gradient boosting matches the best MLP, but is harder to port.
+
+### Low warnings at the same alarm rate
+
+Each method warns when its lowest forecast within the window is below a
+threshold. The threshold is set so that each method gives 7 alarms a week,
+so the methods can be compared at the same alarm rate. A warning is only
+given while glucose is 70 or above. Alarms less than 15 minutes apart count
+as one.
+
+Columns:
+
+- **Caught %:** share of the 641 lows with a warning before them, in the
+  window plus 15 minutes: within 30 minutes for the 15-minute warning, within
+  45 minutes for the 30-minute warning. Higher is better.
+- **Correct %:** share of alarms followed by a low within that time. Higher
+  is better; 100 − correct % are false alarms.
+
+The 15-minute warning ("below 70 within 15 minutes") and the 30-minute
+warning ("within 30 minutes") are scored separately.
+
+| Model | 15 min: caught % | 15 min: correct % | 30 min: caught % | 30 min: correct % |
+|---|---|---|---|---|
+| linear trend 15 min | 35.7 | 54.5 | 30.4 | 46.7 |
+| AAPS IOB | 33.9 | 52.1 | 39.3 | 61.9 |
+| AAPS display curve | 33.7 | 52.1 | 39.2 | 60.8 |
+| AAPS ZT | 33.5 | 50.9 | 30.6 | 46.0 |
+| AAPS UAM | 16.4 | 24.8 | 16.8 | 27.6 |
+| ridge | 42.0 | 64.4 | 40.9 | 63.0 |
+| gbm | 49.8 | 75.7 | 49.3 | 74.8 |
+| server | 48.4 | 73.6 | 48.5 | 73.8 |
+| server-level | 49.1 | 74.5 | 49.1 | 74.8 |
+| server-insulin-synthetic | 47.6 | 72.4 | 45.2 | 70.0 |
+| **server-insulin-carbs-synthetic** | **49.8** | **75.5** | **48.0** | **73.8** |
+| all-level | 47.3 | 71.7 | 47.4 | 72.4 |
+| all-level-synthetic | 47.6 | 72.2 | 46.3 | 70.5 |
+
+At 7 alarms a week, the networks catch about half of the lows, with three
+out of four alarms correct. AAPS's curves catch about a third to two
+fifths, with half to three fifths correct. "No change" never forecasts a
+change, so it cannot warn.
+
+### Low warnings at each method's own threshold
+
+Here a method warns when its own forecast within 30 minutes is below 70, and
+the MLPs also when their probability of a low within 30 minutes is 0.4 or
+more (the server's "low likely" warning).
+
+Columns:
+
+- **Caught %:** share of lows with a warning in the 45 minutes before them.
+  Higher is better.
+- **Alarms / week:** alarms per week of test data. Lower is better, at the
+  same caught %.
+- **Correct %:** share of alarms followed by a low within 45 minutes. Higher
+  is better.
+
+| Model | Warning from | Caught % | Alarms / week | Correct % |
+|---|---|---|---|---|
+| linear trend 15 min | forecast < 70 | 99.4 | 50.4 | 23.1 |
+| AAPS IOB | forecast < 70 | 99.4 | 59.5 | 19.5 |
+| AAPS display curve | forecast < 70 | 99.4 | 58.6 | 19.8 |
+| AAPS ZT | forecast < 70 | 75.8 | 21.6 | 38.0 |
+| AAPS UAM | forecast < 70 | 18.4 | 8.8 | 23.3 |
+| ridge | forecast < 70 | 84.4 | 16.8 | 55.7 |
+| gbm | forecast < 70 | 78.5 | 13.1 | 65.3 |
+| server | forecast < 70 | 68.8 | 10.9 | 67.8 |
+| server | probability ≥ 0.4 | 89.7 | 22.5 | 43.9 |
+| server-level | forecast < 70 | 69.3 | 11.1 | 67.1 |
+| server-level | probability ≥ 0.4 | 91.6 | 23.4 | 43.3 |
+| server-insulin-synthetic | forecast < 70 | 69.6 | 11.9 | 63.8 |
+| server-insulin-synthetic | probability ≥ 0.4 | 89.2 | 22.0 | 45.1 |
+| **server-insulin-carbs-synthetic** | **forecast < 70** | **66.6** | **11.1** | **64.9** |
+| **server-insulin-carbs-synthetic** | **probability ≥ 0.4** | **86.7** | **20.6** | **46.4** |
+| all-level | forecast < 70 | 39.5 | 5.7 | 74.1 |
+| all-level | probability ≥ 0.4 | 84.7 | 18.5 | 50.2 |
+| all-level-synthetic | forecast < 70 | 58.7 | 9.2 | 67.9 |
+| all-level-synthetic | probability ≥ 0.4 | 88.1 | 20.2 | 47.8 |
+
+AAPS's IOB curve announces nearly every low, at about 60 alarms a week, four
+out of five false. The networks' forecasts give 6–12 alarms a week; their low
+probability catches more lows (85–92%) at 19–23 alarms a week.
+
+### High warnings
+
+The same counting for highs: a warning when the highest forecast within 30
+minutes is above 250, while glucose is 250 or below. An alarm is correct if
+glucose goes above 250 within 45 minutes.
+
+Columns:
+
+- **7 / week: caught %** and **7 / week: correct %:** as for lows, at a
+  threshold that gives 7 alarms a week. Higher is better.
+- **Own: caught %**, **own: alarms / week**, **own: correct %:** at the
+  method's own forecast above 250.
+
+| Model | 7 / week: caught % | 7 / week: correct % | Own: caught % | Own: alarms / week | Own: correct % |
+|---|---|---|---|---|---|
+| linear trend 15 min | 74.5 | 41.7 | 100.0 | 23.9 | 17.5 |
+| AAPS IOB | 81.4 | 44.8 | 20.3 | 1.7 | 44.8 |
+| AAPS display curve | 48.1 | 29.1 | 49.8 | 7.2 | 28.9 |
+| AAPS ZT | 72.3 | 39.4 | 3.5 | 0.6 | 23.5 |
+| AAPS UAM | 38.1 | 24.5 | 38.1 | 7.0 | 24.5 |
+| ridge | 91.8 | 52.1 | 75.8 | 4.4 | 65.9 |
+| gbm | 93.5 | 52.8 | 75.3 | 4.3 | 67.8 |
+| server | 92.6 | 52.4 | 75.3 | 4.6 | 62.6 |
+| server-level | 92.6 | 52.6 | 79.7 | 4.8 | 63.8 |
+| server-insulin-synthetic | 96.1 | 54.0 | 90.5 | 5.9 | 59.8 |
+| **server-insulin-carbs-synthetic** | **93.5** | **52.6** | **78.8** | **4.9** | **61.9** |
+| all-level | 91.8 | 51.7 | 74.0 | 4.5 | 63.4 |
+| all-level-synthetic | 90.0 | 50.5 | 66.7 | 4.0 | 65.0 |
+
+Highs (231) are rarer than lows, so 7 alarms a week is generous for them:
+the networks catch 90–96%.
+
+### Response to insulin and carbs
+
+The test samples are changed as if a dose had been logged, and the change of
+the forecast is compared with the measured effect of insulin: 11.7 mg/dL per
+unit in total, about 4 mg/dL by 30 minutes and 8.5 by 60 (see "Synthetic
+insulin data"). Only models with insulin inputs have values.
+
+Columns:
+
+- **Minutes:** the horizon the next columns are read at: 60 for the 2-hour
+  models, 30 for the server models.
+- **+2 U now, wrong direction %:** share of samples where 2 more units now
+  raise the forecast. Lower is better; 0 is right.
+- **+2 U now, change / expected:** mean forecast change divided by the
+  measured effect (−8 mg/dL at 30 minutes, −17 at 60). 1 is right; 0.3
+  means the model sees only a third of the effect.
+- **Meal bolus removed:** mean forecast change in mg/dL when the bolus of a
+  recent meal (2 U or more with 20 g or more carbs) is removed. The measured
+  effect says about +32 mg/dL at 30 minutes.
+- **+20 g carbs now:** mean forecast change in mg/dL for 20 g more carbs
+  logged now. It should be positive.
+
+| Model | Minutes | +2 U now, wrong direction % | +2 U now, change / expected | Meal bolus removed | +20 g carbs now |
+|---|---|---|---|---|---|
+| ridge | 60 | 0.0 | 0.3 | 17.9 | 10.8 |
+| gbm | 60 | 7.4 | 0.6 | 27.7 | 16.4 |
+| server-insulin-synthetic | 30 | 5.5 | 0.7 | 31.8 | – |
+| **server-insulin-carbs-synthetic** | **30** | **0.1** | **0.9** | **32.1** | **13.2** |
+| all-level | 60 | 30.0 | 0.3 | 26.2 | 19.1 |
+| all-level-synthetic | 60 | 0.6 | 1.0 | 34.6 | 22.3 |
+
+Without synthetic data, the closed loop teaches the network that big doses
+come with rising glucose: in 30% of samples 2 more units raise its 2-hour
+forecast. The synthetic copies fix the direction and the size.
+
+### Stability, uncertainty band and drift
+
+Columns:
+
+- **Revision in 5 min:** mean change, in mg/dL, of the forecast for the same
+  moment 30 minutes ahead when it is made again 5 minutes later. Lower means
+  a steadier line on screen. "No change" scores 5.5 only because the
+  reading itself moves.
+- **80% band holds %:** share of actual values within the 10th–90th
+  percentile band at 30 minutes. 80 is right.
+- **Largest half-year bias:** the largest |bias| at 30 minutes in any
+  half-year of the test period, in mg/dL. Lower is better.
+- **MAE when actual < 70:** 30-minute MAE on the slots where glucose turned
+  out below 70, in mg/dL. Lower is better.
+
+| Model | Revision in 5 min | 80% band holds % | Largest half-year bias | MAE when actual < 70 |
+|---|---|---|---|---|
+| no change | 5.5 | – | 0.1 | 28.0 |
+| linear trend 15 min | 15.1 | – | 0.1 | 26.7 |
+| AAPS IOB | 14.2 | – | 14.1 | 20.4 |
+| AAPS display curve | 15.6 | – | 12.1 | 21.3 |
+| AAPS ZT | 5.7 | – | 15.4 | 24.0 |
+| AAPS UAM | 15.8 | – | 2.9 | 39.3 |
+| ridge | 9.7 | – | 4.2 | 31.3 |
+| gbm | 9.0 | – | 4.6 | 27.8 |
+| server | 9.8 | 76.8 | 1.6 | 30.2 |
+| server-level | 9.3 | 77.5 | 0.4 | 31.0 |
+| server-insulin-synthetic | 9.1 | 76.9 | 2.4 | 31.3 |
+| **server-insulin-carbs-synthetic** | **8.9** | **77.4** | **1.4** | **30.2** |
+| all-level | 7.9 | 73.8 | 2.7 | 33.2 |
+| all-level-synthetic | 8.1 | 71.8 | 2.8 | 29.4 |
+
+AAPS's IOB curve is the most accurate method when glucose ends up low
+(MAE 20 against about 30 for the networks), because it predicts too low
+in general. The networks predict too high before lows. This is the
+remaining weak spot.
+
+## Synthetic insulin data
+
+In the closed loop, insulin follows glucose: big doses come with meals and
+rises, and AAPS reacts to every rise with SMBs. A network trained on this
+data reads insulin as a sign that glucose is going up. Before the synthetic
+data, 2 extra units raised the 2-hour forecast in 21% of test samples, and
+10 extra units raised it by 49 mg/dL on average.
+
+**How a synthetic sample is made** (`glupred/synthetic.py`): take a real
+sample, add (or remove) a dose of `units` given `ago` slots before now, and
+change:
+
+- the insulin inputs exactly as a logged dose would change them: activity in
+  the past slots, committed activity for the coming slots, and IOB
+  (`dose_inputs`; a test checks this against `build_features` on a grid with
+  the dose);
+- glucose, in the 2-hour history as in the targets, by −11.7 mg/dL per unit
+  times the share of the effect reached at that moment, along an
+  exponential insulin curve peaking at 35 minutes and done by 2 hours. Values
+  are clipped to the sensor range (40–400).
+
+The effect is measured, not taken from AAPS's ISF (`corrections.py`). Night
+corrections (manual boluses with no carbs around them, 23:00–6:00; 177 of
+216 matched) were compared with moments without one of the same glucose,
+15-minute trend, IOB and time of day. Per unit, glucose was 9 mg/dL lower after 1 hour, 11
+after 1.5 hours and 10 after 2 hours. AAPS's reaction is included: by 2
+hours it held back about 0.3 U of its own insulin per unit corrected.
+AAPS's ISF (median 32 mg/dL per unit) expects −22 mg/dL by 2 hours, twice
+the measured effect. Synthetic data with an ISF-sized effect made
+real-data accuracy worse. The same comparison by day found no effect,
+because daytime corrections come with unlogged food.
+
+**Three kinds of copies**, added to the real training and validation data:
+
+- **random:** −1 to +5 U at a random time in the last 2 hours, one copy of
+  every sample;
+- **peak or falling:** +2 to +5 U in the last 30 minutes, where glucose
+  stopped rising after a rise of 15 mg/dL or more in the hour before, or
+  falls 5 mg/dL or more per 15 minutes from above 120 (about 20% of
+  samples). It shows that a big dose is not always followed by a rise;
+- **meal bolus removed:** up to 2 hours after a meal bolus (2 U or more with
+  20 g or more carbs within 15 minutes, the only manual bolus in 2 hours),
+  the bolus taken away, so glucose rises by what it would have lowered (8%
+  of samples). This assumes AAPS would not make up for it with more SMBs,
+  so the real rise would probably be smaller.
+
+**Results** (`synthetic.py`, 2-hour model on all inputs). Columns:
+
+- **MAE 60 min (validation):** mean absolute error 60 minutes ahead on
+  2025-01 – 2025-06, in mg/dL. Lower is better.
+- **+2 U now, 60 min:** mean forecast change, in mg/dL, for 2 more units now,
+  on test samples. The measured effect is −16.9.
+- **+10 U now, 60 min:** the same for 10 units. The measured effect is −73.5.
+- **Wrong direction %:** share of test samples where 2 more units raise the
+  60-minute forecast. Lower is better.
+
+| Trained on | MAE 60 min (validation) | +2 U now, 60 min | +10 U now, 60 min | Wrong direction % |
+|---|---|---|---|---|
+| real data only | 20.6 | −7.9 | 19.1 | 21.2 |
+| + random | 21.0 | −17.8 | −56.2 | 0.5 |
+| + peak or falling | 20.7 | −14.1 | −52.4 | 2.8 |
+| + meal bolus removed | 20.9 | −6.9 | 20.4 | 23.1 |
+| + peak or falling + meal bolus removed | 20.9 | −16.3 | −58.6 | 1.1 |
+| + all three | 21.1 | −18.5 | −62.4 | 0.1 |
+
+- All three together give the right direction almost always and about the
+  measured size for usual doses. Real-data accuracy costs up to 0.5 mg/dL
+  at 60 minutes, and 0.2 at 30 minutes in the benchmark.
+- The meal copies alone do not help. They only work together with copies
+  that show insulin without a rise.
+- The model is still less sure for large doses (−62 against −74 for 10 U):
+  the copies stop at 5 U.
+- What the copies cannot teach: AAPS's reaction to a dose that was never
+  given, and the effect of insulin at other times of day than the night
+  corrections it was measured on.
 
 ## Caveats
 
