@@ -39,6 +39,40 @@ Tests use `node:test`, `node:assert/strict`, and `supertest`. Name files
 database mappings for server changes; add focused model tests for browser-side
 calculations. Run `npm test` before handing off a change.
 
+## Forecast Models (`modelling/`)
+
+Python with uv; run `uv run pytest -q tests` there. Score every forecast model
+test (new inputs, training data, architecture, synthetic data) with the
+standard benchmark: add the model to `CANDIDATES` in `modelling/benchmark.py`
+and run `uv run python benchmark.py --candidates <name>`. It saves a scorecard
+to `modelling/results/benchmark/<name>.json` and compares all saved runs in
+`modelling/results/benchmark.md`, against "no change" and AAPS's curves. The
+scorecard covers:
+
+- accuracy at 15/30/60/120 min (MAE, RMSE, P90, bias, Clarke A, skill over
+  "no change") on the slots where AAPS made a curve, all and "nothing eaten",
+- by situation: actual < 70 / 70–180 / > 180, after a meal bolus or a
+  correction, night, after sport, high heart rate,
+- warnings of lows (< 70) within 15 and 30 min and highs (> 250) within 30
+  min, per episode: a warning counts as correct if the event comes within the
+  window plus 15 min (30 / 45 min); at the model's own threshold and at a fixed
+  alarm budget,
+- response to insulin (now, 1 h ago, meal bolus removed), carbs and exercise:
+  direction and size against the measured effect,
+- stability (5-minute revision of a forecast), 80% band coverage, and bias
+  per half-year (drift).
+
+Add targets for the problem a change is meant to solve (for example dosing
+decisions, eat-now warnings, or a what-if line) as extra metrics in
+`modelling/glupred/benchmark.py`, so they apply to later runs too. Report the
+scorecard rows when presenting a model result. Results and models are derived
+from health data: keep `modelling/results/` and `.cache/` out of git.
+
+When presenting results, put one number per table cell, and before the
+table explain every column in a short paragraph: what is counted, the
+unit, and whether higher or lower is better. Never combine several numbers
+in one cell (such as "98% / 54% / 35") without that explanation.
+
 ## Commit & Pull Request Guidelines
 
 Use concise imperative, sentence-case commit subjects, following existing
