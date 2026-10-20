@@ -21,19 +21,20 @@ export function createPredictionRoutes (ctx) {
     }
   };
 
-  router.get('/', ctx.auth.require('api:entries:read'), h(async (req, res) => {
+  router.get('/', ctx.auth.require('api:entries:read', 'This needs a token or account that may read glucose entries.'), h(async (req, res) => {
     const row = await store.current();
     if (!row) return res.json({ available: false, reason: 'no prediction model uploaded' });
     res.json(predict(await recentReadings(ctx.pool, row.model), { model: row.model }));
   }));
 
-  router.get('/model', ctx.auth.require('api:entries:read'), h(async (req, res) => {
+  router.get('/model', ctx.auth.require('api:entries:read', 'This needs a token or account that may read glucose entries.'), h(async (req, res) => {
     const row = await store.current();
     if (!row) return res.status(404).json({ status: 404, message: 'No prediction model uploaded' });
     res.json(modelInfo(row));
   }));
 
-  router.put('/model', ctx.auth.require(UPLOAD_MODEL), express.json({ limit: '5mb' }), h(async (req, res) => {
+  router.put('/model', ctx.auth.require(UPLOAD_MODEL,
+    'Only admins and tokens with the access "Upload model" may upload models; create one under Access on the admin page.'), express.json({ limit: '5mb' }), h(async (req, res) => {
     const problems = modelProblems(req.body);
     if (problems.length) return res.status(422).json({ status: 422, message: 'Model rejected', problems });
     const auth = await ctx.auth.fromRequest(req);

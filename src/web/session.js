@@ -76,7 +76,7 @@ export function createSessionRoutes (ctx) {
 
   // --- people (who may sign in), for admins ------------------------------
 
-  const admin = auth.require(MANAGE_ACCESS);
+  const admin = auth.require(MANAGE_ACCESS, 'Only admins may do this.');
   const userJson = (u) => ({ email: u.email, name: u.name, picture: u.picture, isAdmin: u.is_admin, last_login: u.last_login, created_at: u.created_at });
   // Admins cannot demote or remove themselves, so there is always one left.
   const isSelf = async (req, email) => (await auth.fromRequest(req)).user?.email === email;

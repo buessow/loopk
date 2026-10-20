@@ -216,13 +216,16 @@ export class Auth {
     return hasPermission(auth?.permissions, permission);
   }
 
-  /** Express middleware factory: demands a permission (401 if not signed in, 403 if not allowed). */
-  require (permission) {
+  /**
+   * Express middleware factory: demands a permission (401 if not signed in,
+   * 403 if not allowed). `why` says in the 403 what is needed instead.
+   */
+  require (permission, why = `This needs the permission ${permission}.`) {
     return async (req, res, next) => {
       try {
         const auth = await this.fromRequest(req);
         if (this.can(auth, permission)) return next();
-        if (auth.attempted && !auth.failed) return res.status(403).json({ status: 403, message: 'Forbidden', description: 'Only admins may do this' });
+        if (auth.attempted && !auth.failed) return res.status(403).json({ status: 403, message: 'Forbidden', description: why, permission });
         res.status(401).json({ status: 401, message: 'Unauthorized', description: 'Invalid/Missing' });
       } catch (err) {
         next(err);

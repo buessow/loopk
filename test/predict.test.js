@@ -106,7 +106,9 @@ test('only model upload tokens and admins may upload, and a bad model is refused
   const writer = await tokenFor(s.ctx, 'aaps');
   await request(s.app).put('/api/prediction/model').send(model).expect(401);
   await request(s.app).put('/api/prediction/model').set(auth(writer)).send(model).expect(403);
-  await request(s.app).put('/api/prediction/model').set(auth(reader)).send(model).expect(403);
+  const refused = await request(s.app).put('/api/prediction/model').set(auth(reader)).send(model).expect(403);
+  assert.equal(refused.body.permission, 'model:upload');
+  assert.match(refused.body.description, /Upload model/);
   const bad = await request(s.app).put('/api/prediction/model').set(auth(uploader)).send({ ...model, horizons: 3 }).expect(422);
   assert.ok(bad.body.problems.length);
   await request(s.app).get('/api/prediction/model').set(auth(reader)).expect(404);

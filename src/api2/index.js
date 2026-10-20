@@ -27,7 +27,7 @@ export function createApi2 (ctx) {
   const subjectJson = (s) => ({
     _id: String(s.id), name: s.name, canWrite: s.can_write, canUploadModel: s.can_upload_model, notes: s.notes, accessToken: s.access_token, created_at: s.created_at,
   });
-  const admin = auth.require(MANAGE_ACCESS);
+  const admin = auth.require(MANAGE_ACCESS, 'Only admins may do this.');
   const notBoolean = (v) => v !== undefined && typeof v !== 'boolean';
   const badFlags = (body) => (notBoolean(body?.canWrite) && 'canWrite') || (notBoolean(body?.canUploadModel) && 'canUploadModel');
 
