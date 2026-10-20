@@ -14,7 +14,7 @@ uv run python train.py --oracle           # also measure the future-inputs leak
 uv run python scenarios.py               # 4 h model: dosing, eat-now, highs
 uv run python whatif.py                  # forecasts under an insulin plan
 uv run python export.py                  # retrain and export the server model
-LOOPK_MODEL_TOKEN=... uv run python export.py --no-train --upload https://loopk.robertbuessow.com
+uv run python upload.py --url https://loopk.robertbuessow.com --token <token>   # upload results/model.json
 uv run pytest
 ```
 
@@ -32,7 +32,9 @@ uv run pytest
 - `scenarios.py`, `whatif.py` — scenario and what-if reports in `results/`.
 - `export.py` — trains the server model, writes `results/model.json` (not
   committed) and the parity fixture `../test/fixtures/prediction.json`
-  (synthetic readings, random network). `--upload URL` sends the model to a
-  loopk server; create an "Upload model" access token on its Access page
-  and pass it as `LOOPK_MODEL_TOKEN`. The server reruns the model's bundled
-  checks before it accepts it.
+  (synthetic readings, random network). `--upload [URL]` also uploads it.
+- `upload.py` — uploads a model file (default `results/model.json`) to a
+  loopk server. `--url` and `--token`, or `LOOPK_URL` and
+  `LOOPK_MODEL_TOKEN`; the token is an "Upload model" access token from the
+  server's Access page. The server reruns the model's bundled checks before
+  it accepts it.
