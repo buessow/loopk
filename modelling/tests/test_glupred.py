@@ -130,3 +130,56 @@ def test_duplicate_carb_entries_are_dropped():
     c = pd.DataFrame({'date': [t, t + pd.Timedelta('2s'), t + pd.Timedelta('10s'), t + pd.Timedelta('5min')],
                       'carbs': [30.0, 30.0, 10.0, 30.0]})
     assert dedupe(c, 'carbs', 0.5)['carbs'].tolist() == [30.0, 10.0, 30.0]
+
+
+def synthetic_grid(n=200):
+    rng = np.random.default_rng(0)
+    index = pd.date_range('2025-01-01', periods=n, freq='5min', tz='UTC')
+    return pd.DataFrame({
+        'glucose': 120 + np.cumsum(rng.normal(0, 2, n)), 'bolus': np.where(np.arange(n) % 40 == 0, 1.0, 0.0),
+        'basal': np.full(n, 0.08), 'profile_basal': np.full(n, 0.07), 'carbs': np.where(np.arange(n) % 60 == 5, 30.0, 0.0),
+        'hr': np.full(n, 70.0), 'local_hour': (np.arange(n) * 5 / 60) % 24, 'sport': np.zeros(n)}, index=index)
+
+
+def test_an_added_dose_changes_inputs_and_glucose_as_a_logged_one_would():
+    from glupred.features import build_features
+    from glupred.synthetic import acted, add_insulin
+    grid = synthetic_grid(300)
+    horizons, i, drop = 24, 150, 30.0
+    X, Y, _ = build_features(grid, horizons=horizons)
+    effect = acted(insulin_kernel(peak=60, duration=240), 100)
+    for ago in (0, 7, 23):
+        dosed = grid.copy()
+        dosed.iloc[i - ago, dosed.columns.get_loc('bolus')] += 2.0
+        # The glucose the dose would have lowered, from the slot after it on.
+        m = np.arange(len(grid)) - (i - ago)
+        dosed['glucose'] -= drop * np.where(m >= 0, effect[np.clip(m, 0, len(effect) - 1)], 0.0)
+        X2, Y2, _ = build_features(dosed, horizons=horizons)
+        x, y = add_insulin(X.iloc[[i]], Y.iloc[[i]].to_numpy(), np.array([2.0]), np.array([ago]),
+                           np.array([drop]), insulin_kernel(), effect)
+        assert np.allclose(x[0], X2.iloc[i].to_numpy(), equal_nan=True)
+        assert np.allclose(y[0], Y2.iloc[i].to_numpy())
+
+
+def test_glucose_lowered_by_an_added_dose_stops_at_the_sensor_minimum():
+    from glupred.synthetic import SENSOR_MIN, acted, add_insulin
+    X = pd.DataFrame({'g_now': [60.0], 'gd_1': [5.0]})
+    _, y = add_insulin(X, np.zeros((1, 72)), np.array([5.0]), np.array([0]), np.array([200.0]),
+                       insulin_kernel(), acted(insulin_kernel(), 80))
+    assert y[0, -1] == SENSOR_MIN - 60
+
+
+def test_calibration_makes_the_mean_forecast_unbiased_on_validation():
+    from glupred.nn import Model
+    rng = np.random.default_rng(0)
+    n = 4000
+    X = rng.normal(size=(n, 3))
+    g = np.full(n, 120.0)
+    Y = g[:, None] * (np.exp(0.3 * rng.normal(size=(n, 2))) - 1)  # noisy log changes around 0
+    mask = np.ones((n, 2), dtype=bool)
+    args = (X[:3000], g[:3000], Y[:3000], mask[:3000], None, X[3000:], g[3000:], Y[3000:], mask[3000:], None)
+    raw = Model(quantiles=(), calibrate=False).fit(*args, epochs=3, log=lambda *_: None)
+    cal = Model(quantiles=()).fit(*args, epochs=3, log=lambda *_: None)
+    actual = (Y + g[:, None])[3000:]
+    assert np.mean(raw.predict(X[3000:], g[3000:])['mean'] - actual) < -3
+    assert abs(np.mean(cal.predict(X[3000:], g[3000:])['mean'] - actual)) < 0.5

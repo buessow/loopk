@@ -24,6 +24,8 @@ HR_HIGH = 120
 INTERPOLATE_SLOTS = 2
 INSULIN_STALE_SLOTS = 72  # no insulin record for 6 h: delivery is unknown
 SPORT_HOURS = (1, 3, 6, 24)
+LEVEL_DAYS = (1, 3, 7)
+LEVEL_FALLBACK = 120.0
 
 
 def shift(a, k):
@@ -85,12 +87,15 @@ def future_steps(horizons):
     return list(range(1, min(horizons, 12) + 1)) + list(range(15, horizons + 1, 3))
 
 
-def build_features(grid, insulin=None, carbs=None, oracle=False, rescue=None, horizons=HORIZONS, sport=False):
+def build_features(grid, insulin=None, carbs=None, oracle=False, rescue=None, horizons=HORIZONS, sport=False,
+                   level=False):
     """Returns (X DataFrame, Y DataFrame of glucose deltas, info DataFrame).
 
     `rescue` (keyword arguments of rescue_carbs, or {} for the defaults) adds
     assumed rescue carbs to the logged ones. `sport=True` adds recorded
-    activity inputs; they did not improve accuracy (FINDINGS.md, Sport)."""
+    activity inputs; they did not improve accuracy (FINDINGS.md, Sport).
+    `level=True` adds the mean glucose of the last LEVEL_DAYS days
+    (g_mean_<d>d; at least half the readings, else LEVEL_FALLBACK)."""
     insulin = insulin or {}
     carbs = carbs or {}
     ik = insulin_kernel(**insulin)
@@ -145,6 +150,11 @@ def build_features(grid, insulin=None, carbs=None, oracle=False, rescue=None, ho
         cols['sport_since_h'] = np.minimum(since * 5 / 60, 24.0)
         sport_hr = rolling(np.where((active > 0) & hr_known, hr, np.nan), 12, 'mean')
         cols['sport_hr_1h'] = np.nan_to_num(sport_hr, nan=0.0)
+
+    if level:
+        for days in LEVEL_DAYS:
+            mean = pd.Series(g).rolling(days * 288, min_periods=days * 144).mean().to_numpy()
+            cols[f'g_mean_{days}d'] = np.where(np.isnan(mean), LEVEL_FALLBACK, mean)
 
     hour = grid['local_hour'].to_numpy()
     cols['hour_sin'] = np.sin(2 * np.pi * hour / 24)

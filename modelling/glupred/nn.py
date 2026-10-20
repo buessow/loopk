@@ -7,6 +7,12 @@ Outputs per sample:
 
 Regression targets count only where `mask` is set (no new carbs before that
 horizon), so the glucose outputs predict what happens if nothing is eaten.
+
+Squared error on the log change gives exp(E[log]), below the mean glucose
+(by about half the log variance). `calibrate` therefore shifts the mean
+output by log(mean(actual / predicted)) per horizon on the validation
+samples (smearing), folded into the output layer's bias so that an
+exported network carries it.
 """
 
 import numpy as np
@@ -49,11 +55,13 @@ def _loss(net, reg, logits, y, mask, ev):
 class Model:
     """Standardizes inputs and targets, trains with early stopping."""
 
-    def __init__(self, quantiles=(0.1, 0.25), events=(), hidden=(128, 64), seed=1):
+    def __init__(self, quantiles=(0.1, 0.25), events=(), hidden=(128, 64), seed=1, calibrate=True):
         self.quantiles = quantiles
         self.events = events
         self.hidden = hidden
         self.seed = seed
+        self.calibrate = calibrate
+        self.shift = None
 
     def fit(self, X, g_now, Y, mask, E, X_val, g_val, Y_val, mask_val, E_val,
             epochs=40, patience=4, batch=1024, lr=1e-3, log=print):
@@ -91,7 +99,17 @@ class Model:
                 if bad >= patience:
                     break
         self.net.load_state_dict(best_state)
+        if self.calibrate:
+            self._calibrate(X_val, g_val, Y_val, mask_val)
         return self
+
+    def _calibrate(self, X, g_now, Y, mask):
+        pred = self.predict(X, g_now)['mean']
+        ratio = (Y + g_now[:, None]) / pred
+        self.shift = np.array([np.log(np.mean(ratio[mask[:, h], h])) if mask[:, h].any() else 0.0
+                               for h in range(Y.shape[1])])
+        with torch.no_grad():
+            self.net.head.bias[:Y.shape[1]] += torch.tensor(self.shift / self.ysd, dtype=torch.float32)
 
     def _tensors(self, X, g_now, Y, mask, E):
         x = torch.tensor((X - self.mu) / self.sd, dtype=torch.float32)
