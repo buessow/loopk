@@ -13,6 +13,10 @@ uv run python train.py --models ridge     # reuse the cached data
 uv run python train.py --oracle           # also measure the future-inputs leak
 uv run python scenarios.py               # 4 h model: dosing, eat-now, highs
 uv run python whatif.py                  # forecasts under an insulin plan
+uv run python usual.py                   # how predictable eating and insulin delivery are
+uv run python sensitivity.py             # basal drift and ISF against AAPS's values
+uv run python simulate.py                # glucose simulated with AAPS's ISF and CR vs the sensor
+uv run python curve.py                   # insulin action curve fitted to the glucose response
 uv run python export.py                  # retrain and export the server model
 uv run python upload.py --url https://loopk.robertbuessow.com --token <token>   # upload results/model.json
 uv run pytest
@@ -29,7 +33,11 @@ uv run pytest
   AAPS's own predicted curves; MAE/RMSE, Clarke zones, low detection.
 - `train.py` — time-based split (train → 2025-01, validation → 2025-07, test
   after), writes `results/report.md` (not committed: derived from health data).
-- `scenarios.py`, `whatif.py` — scenario and what-if reports in `results/`.
+- `scenarios.py`, `whatif.py`, `usual.py` — scenario, what-if and usual-actions
+  reports in `results/`.
+- `sensitivity.py`, `simulate.py`, `curve.py` — checks of AAPS's basal, ISF,
+  carb ratio and insulin curve against the sensor (`glupred/sensitivity.py`,
+  `glupred/simulate.py`); reports in `results/`.
 - `export.py` — trains the server model, writes `results/model.json` (not
   committed) and the parity fixture `../test/fixtures/prediction.json`
   (synthetic readings, random network). `--upload [URL]` also uploads it.
