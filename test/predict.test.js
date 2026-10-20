@@ -51,6 +51,23 @@ test('prediction reports 15 and 30 minutes after the newest reading', () => {
   assert.equal(typeof p.lowWarning, 'boolean');
 });
 
+test('past predictions are what the readings up to then predicted for now', () => {
+  const c = fixture.cases.find((x) => x.name === 'wavy, regular');
+  const p = predict(c.readings, { model });
+  assert.deepEqual(p.past.map((x) => x.minutes), [15, 30]);
+  const newest = Math.max(...c.readings.map((r) => r.date));
+  for (const x of p.past) {
+    const then = predict(c.readings.filter((r) => r.date <= x.madeAt), { model });
+    assert.equal(then.date, x.madeAt);
+    assert.equal(newest - x.madeAt, x.minutes * 60000);
+    assert.equal(x.sgv, then.predictions.find((q) => q.minutes === x.minutes).sgv);
+    assert.ok(Math.abs(x.errorPercent - (x.sgv - x.actual) / x.actual * 100) < 1, `${x.minutes} min: ${x.errorPercent}%`);
+  }
+  // Without readings that far back there is nothing to compare.
+  const short = c.readings.filter((r) => r.date > newest - 2.2 * 3600000);
+  assert.deepEqual(predict(short, { model }).past.map((x) => x.minutes), [15]);
+});
+
 test('a model passes its own checks, and fails them when changed', () => {
   assert.deepEqual(modelProblems(model), []);
   const tampered = structuredClone(model);
@@ -123,7 +140,8 @@ test('prediction API answers without a model, then predicts after an upload', as
   assert.equal(gap.body.available, false);
   assert.match(gap.body.reason, /gap/);
 
-  await addReadings(writer, end, Array.from({ length: 26 }, (_, i) => 180 - 3 * i));
+  // 2 h 40 min, enough for the predictions made 15 and 30 minutes ago.
+  await addReadings(writer, end, Array.from({ length: 33 }, (_, i) => 200 - 3 * i));
   const res = await request(s.app).get('/api/prediction').set(auth(reader)).expect(200);
   assert.equal(res.headers['cache-control'], 'no-store');
   assert.equal(res.body.available, true);
@@ -132,6 +150,8 @@ test('prediction API answers without a model, then predicts after an upload', as
   const [p15, p30] = res.body.predictions;
   assert.equal(p15.minutes, 15);
   assert.equal(p30.date, end + 30 * 60000);
+  assert.deepEqual(res.body.past.map((x) => x.minutes), [15, 30]);
+  assert.ok(res.body.past.every((x) => Number.isFinite(x.errorPercent)));
 });
 
 test('a newer upload replaces the model in use', async () => {

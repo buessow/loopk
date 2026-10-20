@@ -112,16 +112,41 @@ export function run (inputs, model) {
 }
 
 /**
+ * What the model predicts for the slot of the newest reading from the
+ * readings `minutes` earlier, or null when those have gaps. The lead can be
+ * longer than `minutes` when the reading that far back is missing.
+ */
+export function pastPrediction (readings, now, minutes, { model, timeZone }) {
+  const slotMs = model.slotMinutes * MIN;
+  const cutoff = now.slot - (minutes / model.slotMinutes - 1) * slotMs;
+  const earlier = readings.filter((r) => r.date < cutoff);
+  const built = buildInputs(earlier, { model, timeZone });
+  if (!built.inputs) return null;
+  const k = Math.round((now.slot - built.slot) / slotMs);
+  if (k < 1 || k > model.horizons) return null;
+  const predicted = run(built.inputs, model).mean[k - 1];
+  const actual = now.inputs[model.inputs.indexOf('g_now')];
+  return {
+    minutes: k * model.slotMinutes,
+    madeAt: Math.max(...earlier.filter((r) => r.sgv >= SGV_MIN && r.sgv <= SGV_MAX).map((r) => r.date)),
+    sgv: Math.round(predicted),
+    actual: Math.round(actual),
+    errorPercent: Math.round((predicted - actual) / actual * 1000) / 10,
+  };
+}
+
+/**
  * The prediction API document: glucose (mg/dL) 15 and 30 minutes after the
  * newest reading, with the 10th–90th percentile range, and the probability
- * of falling below 70 within 30 minutes.
+ * of falling below 70 within 30 minutes. `past`: what was predicted for now
+ * 15 and 30 minutes ago, with the error in percent of the actual glucose.
  */
-export function predict (readings, { model, timeZone, minutes = [15, 30] }) {
-  const { slot, inputs, reason } = buildInputs(readings, { model, timeZone });
+export function predict (readings, { model, timeZone, minutes = [15, 30], past = [15, 30] }) {
+  const now = buildInputs(readings, { model, timeZone });
   const base = { model: model.version };
-  if (!inputs) return { ...base, available: false, reason, date: slot };
+  if (!now.inputs) return { ...base, available: false, reason: now.reason, date: now.slot };
   const latest = Math.max(...readings.filter((r) => r.sgv >= SGV_MIN && r.sgv <= SGV_MAX).map((r) => r.date));
-  const out = run(inputs, model);
+  const out = run(now.inputs, model);
   const p = out.p_low_30;
   return {
     ...base,
@@ -139,12 +164,16 @@ export function predict (readings, { model, timeZone, minutes = [15, 30] }) {
     }),
     lowProbability30: Math.round(p * 1000) / 1000,
     lowWarning: p >= model.lowWarning,
+    past: past.map((m) => pastPrediction(readings, now, m, { model, timeZone })).filter(Boolean),
   };
 }
 
-/** Readings for a prediction: the newest one and the 2 h (and anchors) before it. */
-export async function recentReadings (pool, model) {
-  const minutes = (model.history + ANCHOR_SLOTS + 1) * model.slotMinutes;
+/**
+ * Readings for a prediction: the newest one and the 2 h (and anchors) before
+ * it, plus `pastMinutes` more for the predictions made that much earlier.
+ */
+export async function recentReadings (pool, model, pastMinutes = 30) {
+  const minutes = (model.history + ANCHOR_SLOTS + 1) * model.slotMinutes + pastMinutes;
   const { rows } = await pool.query(
     `WITH g AS (
        SELECT date, sgv, utc_offset FROM entries

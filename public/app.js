@@ -396,9 +396,11 @@ function renderTrend (id, current, previous, decimals, name) {
 /** Predicted glucose for the reading shown, while it is current (GET /api/prediction). */
 function renderForecast (last, stale) {
   const el = $('forecast');
+  const pastEl = $('forecastPast');
   const p = state.recent.prediction;
   if (stale || !last || !p?.available || Math.abs(p.date - last.t) > MIN) {
     el.hidden = true;
+    pastEl.hidden = true;
     return;
   }
   const v = (sgv) => fmt(sgv / MGDL_PER_MMOL);
@@ -408,6 +410,14 @@ function renderForecast (last, stale) {
   el.title = 'From the last 2 h of glucose and the time of day. 80% range: '
     + p.predictions.map((x) => `${x.minutes} min ${v(x.low)}–${v(x.high)}`).join(', ')
     + `. Chance of a low within 30 min: ${Math.round(p.lowProbability30 * 100)}%.`;
+
+  // What was predicted for now, and how far off it was.
+  const past = p.past || [];
+  pastEl.hidden = !past.length;
+  const pct = (e) => `${e > 0 ? '+' : e < 0 ? '−' : '±'}${Math.abs(Math.round(e))}%`;
+  pastEl.innerHTML = 'Predicted ' + past.map((x) => `${x.minutes} min ago <b>${v(x.sgv)}</b> (${pct(x.errorPercent)})`).join(' · ');
+  pastEl.title = past.map((x) => `${x.minutes} min ago (${hm(x.madeAt)}), the model predicted ${v(x.sgv)} for now; `
+    + `actual ${v(x.actual)}, error ${pct(x.errorPercent)}`).join('. ') + '.';
 }
 
 function renderStats () {
@@ -423,6 +433,7 @@ function renderStats () {
   if (!last) {
     $('glucoseKicker').textContent = 'Glucose now';
     $('forecast').hidden = true;
+    $('forecastPast').hidden = true;
     $('bgNow').textContent = '–';
     $('bgNow').className = 'bg-now';
     $('delta').textContent = 'No glucose readings';

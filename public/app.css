@@ -54,6 +54,8 @@
 .stat-sub { font-size: 13px; color: var(--color-neutral-700); }
 .forecast { margin-top: var(--space-1); font-size: 16px; }
 .forecast b { font-family: var(--font-heading); font-weight: 600; font-size: 22px; color: var(--color-neutral-900); }
+.forecast-past { font-size: 14px; }
+.forecast-past b { font-size: 18px; }
 .bg-now { font-family: var(--font-heading); font-weight: 600; font-size: 76px; line-height: 1; color: var(--color-neutral-700); }
 .bg-now.high { color: var(--bg-high); }
 .bg-now.ok { color: var(--bg-ok); }
