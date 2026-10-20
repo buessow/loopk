@@ -4,3 +4,7 @@ node_modules/
 .DS_Store
 create-db-users.sql
 mongo-analysis/
+modelling/.cache/
+modelling/.venv/
+modelling/results/
+__pycache__/
