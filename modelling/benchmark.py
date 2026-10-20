@@ -23,10 +23,10 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from export import INPUTS as SERVER_INPUTS
+from export import GLUCOSE_INPUTS as SERVER_INPUTS
 from glupred import baselines
 from glupred import benchmark as bm
-from glupred.features import ACTIVITY_LAGS, LEVEL_DAYS, SPORT_HOURS, build_features, future_steps
+from glupred.features import LEVEL_DAYS, SPORT_HOURS, activity_inputs, build_features
 from glupred.load import load
 from glupred.nn import Model
 from glupred.scenarios import low_event
@@ -92,11 +92,6 @@ class Regression:
         h = np.arange(1, HORIZONS + 1)
         d = np.stack([np.interp(h, self.slots, row) for row in d])
         return {'mean': d + g[:, None]}
-
-
-def activity_inputs(prefix, on_board, horizons):
-    return ([f'{prefix}_past_{lag}' for lag in ACTIVITY_LAGS] + [f'{prefix}_fut_{k}' for k in future_steps(horizons)]
-            + [on_board])
 
 
 def train(data, spec, tr, va):

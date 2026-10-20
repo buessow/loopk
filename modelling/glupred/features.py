@@ -87,6 +87,13 @@ def future_steps(horizons):
     return list(range(1, min(horizons, 12) + 1)) + list(range(15, horizons + 1, 3))
 
 
+def activity_inputs(prefix, on_board, horizons):
+    """Names of the activity inputs of insulin ('ia', 'iob') or carbs ('ca',
+    'cob'): in the past, committed for the coming slots, on board."""
+    return ([f'{prefix}_past_{lag}' for lag in ACTIVITY_LAGS] + [f'{prefix}_fut_{k}' for k in future_steps(horizons)]
+            + [on_board])
+
+
 def build_features(grid, insulin=None, carbs=None, oracle=False, rescue=None, horizons=HORIZONS, sport=False,
                    level=False):
     """Returns (X DataFrame, Y DataFrame of glucose deltas, info DataFrame).
@@ -167,7 +174,8 @@ def build_features(grid, insulin=None, carbs=None, oracle=False, rescue=None, ho
     insulin_known = rolling(activity.astype(float), INSULIN_STALE_SLOTS, 'max') > 0
     valid = (~np.isnan(g_raw) & X.filter(like='gd_').notna().all(axis=1).to_numpy()
              & Y.notna().all(axis=1).to_numpy() & insulin_known)
-    info = pd.DataFrame({'valid': valid, 'hr_known': recent > 0, 'assumed_carbs': assumed}, index=grid.index)
+    info = pd.DataFrame({'valid': valid, 'hr_known': recent > 0, 'assumed_carbs': assumed,
+                         'insulin_known': insulin_known}, index=grid.index)
     mask = no_new_carbs(c, horizons)
     for h in range(horizons):
         info[f'no_carbs_h{h + 1}'] = mask[:, h]
