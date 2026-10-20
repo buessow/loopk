@@ -42,6 +42,7 @@ const state = {
   units: stored('units', (v) => UNITS.includes(v), null),
   style: stored('style', (v) => STYLES.includes(v), 'boxes'),
   showProfile: stored('profile', (v) => v === '0' || v === '1', true, (v) => v === '1'),
+  showForecast: stored('forecast', (v) => v === '0' || v === '1', false, (v) => v === '1'),
   offset: 0, // ms the window is panned back from the anchor
   W: 1200,
   hoverT: null,
@@ -122,18 +123,38 @@ async function fetchRange (col, field, from, to, query = '') {
   return result;
 }
 
-/** Entries, treatments, device status and heart rate in [from, to). */
+/**
+ * Recorded predictions for [from, to) (to null: up to the newest, which
+ * lies ahead of now), in requests of at most 30 days. Optional: [] on errors.
+ */
+async function fetchPredictions (from, to) {
+  const end = to ?? Date.now() + HOUR;
+  const out = [];
+  try {
+    for (let t = from; t < end; t += 30 * DAY) {
+      out.push(...await api(`/api/prediction/history?from=${Math.round(t)}&to=${Math.round(Math.min(end, t + 30 * DAY))}`));
+    }
+  } catch {
+    return [];
+  }
+  return out;
+}
+
+/** Entries, treatments, device status, heart rate and recorded predictions in [from, to). */
 async function fetchSeries (from, to) {
-  const [entries, treatments, devicestatus, heartrate] = await Promise.all([
+  const [entries, treatments, devicestatus, heartrate, predictions] = await Promise.all([
     fetchRange('entries', 'date', from, to, '&type=sgv&fields=identifier,date,srvModified,sgv,direction,type'),
     fetchRange('treatments', 'created_at', from, to, '&fields=' + TREATMENT_FIELDS),
     fetchRange('devicestatus', 'date', from, to, '&fields=' + DEVICESTATUS_FIELDS).catch(() => []),
     fetchRange('heartrate', 'date', from, to, '&fields=identifier,date,srvModified,beatsPerMinute').catch(() => []),
+    fetchPredictions(from, to),
   ]);
-  return { entries, treatments, devicestatus, heartrate };
+  return { entries, treatments, devicestatus, heartrate, predictions };
 }
 
+// Collections kept in the browser cache; the chart also keeps predictions.
 const SERIES = ['entries', 'treatments', 'devicestatus', 'heartrate'];
+const WINDOW_SERIES = [...SERIES, 'predictions'];
 
 /** Applies only API changes newer than the cursor saved in this browser. */
 async function syncCollection (collection) {
@@ -228,7 +249,7 @@ async function loadRecent ({ refreshCache = true } = {}) {
     state.loadedTo = null;
   } else if (state.loadedTo == null) {
     const older = (d) => docTime(d) < from;
-    for (const k of SERIES) state.win[k] = merge(state.win[k], series[k], older);
+    for (const k of WINDOW_SERIES) state.win[k] = merge(state.win[k], series[k], older);
     state.loadedFrom = Math.min(state.loadedFrom, from);
   }
   rebuild();
@@ -267,7 +288,7 @@ async function ensureLoaded () {
       fetchSeries(job.from, job.to),
       job.from < state.loadedFrom ? fetchSwitchBefore(job.from) : null,
     ]);
-    for (const k of SERIES) state.win[k] = merge(state.win[k], series[k]);
+    for (const k of WINDOW_SERIES) state.win[k] = merge(state.win[k], series[k]);
     if (job.from < state.loadedFrom) {
       state.win.switchesBefore = switchesBefore;
       state.loadedFrom = job.from;
@@ -318,7 +339,7 @@ function trim () {
     changed = true;
   }
   const inside = (d) => { const t = docTime(d); return t >= state.loadedFrom && (state.loadedTo == null || t < state.loadedTo); };
-  for (const k of SERIES) {
+  for (const k of WINDOW_SERIES) {
     const filtered = w[k].filter(inside);
     if (filtered.length !== w[k].length) changed = true;
     w[k] = filtered;
@@ -599,6 +620,13 @@ function linePath (points, X, Y, gap) {
   return d.trim();
 }
 
+// Recorded predictions in the glucose lane: what was predicted for each
+// moment 15 and 30 minutes before it.
+const FORECAST_LINES = [
+  [15, 'stroke:var(--color-accent-2-600);stroke-width:1.5;stroke-dasharray:6 3'],
+  [30, 'stroke:var(--color-accent-2-500);stroke-width:1.75;stroke-dasharray:2 3'],
+];
+
 const rangeOf = (v) => (v < LO ? 'lo' : v > HI ? 'hi' : 'ok');
 
 /** Glucose in the chosen style: boxes, sticks (fading bars), dots or a line. */
@@ -724,6 +752,12 @@ function renderChart () {
   }
 
   push(glucoseMarks(geo));
+  if (state.showForecast) {
+    for (const [minutes, style] of FORECAST_LINES) {
+      const points = sampled(D.forecast[minutes] || [], t0, t1, k);
+      push(`<path d="${linePath(points, X, GY, Math.max(20, 10 * k) * MIN)}" style="fill:none;${style};stroke-linejoin:round"></path>`);
+    }
+  }
   for (const e of ev.filter((x) => x.type === 'bg')) {
     const x = X(e.t);
     const y = GY(e.v);
@@ -785,14 +819,20 @@ function renderHover () {
   const sg = D.basal.find((s) => t >= s.t0 && t < s.t1);
   const cob = nearest(D.cobSeries.filter((q) => Math.abs(q.t - t) <= 10 * MIN), t, 10 * MIN);
   const h = nearest(D.hr.filter((q) => Math.abs(q.t - t) <= 10 * MIN), t, 10 * MIN);
-  const left = Math.round(x > W - 220 ? x - 194 : x + 14);
+  const predicted = state.showForecast
+    ? FORECAST_LINES.map(([m]) => [m, nearest((D.forecast[m] || []).filter((q) => Math.abs(q.t - t) <= 5 * MIN), t, 5 * MIN)])
+    : [];
+  // Wider with the prediction rows, so their labels fit on one line.
+  const boxW = predicted.length ? 216 : 180;
+  const left = Math.round(x > W - boxW - 40 ? x - boxW - 14 : x + 14);
   const time = state.hours > 24 || state.offset > 0 ? dayHm(t) : hm(t);
   g.innerHTML = `<line x1="${f1(x)}" x2="${f1(x)}" y1="${Ln.bT}" y2="${axis}" style="stroke:var(--color-text);stroke-width:1"></line>`
     + (p ? `<circle cx="${f1(x)}" cy="${f1(GY(p.v))}" r="5" style="fill:none;stroke:var(--color-text);stroke-width:1.5"></circle>` : '')
     + (h ? `<circle cx="${f1(x)}" cy="${f1(HY(h.v))}" r="4" style="fill:none;stroke:var(--color-text);stroke-width:1.5"></circle>` : '')
-    + `<foreignObject x="${left}" y="${Ln.gT}" width="196" height="140" style="pointer-events:none"><div xmlns="http://www.w3.org/1999/xhtml" style="width:180px;margin:4px;background:var(--color-bg);border:1px solid var(--color-text);box-shadow:var(--shadow-md);padding:var(--space-2) var(--space-3);display:grid;grid-template-columns:1fr auto;gap:2px var(--space-3);font-size:12px">`
+    + `<foreignObject x="${left}" y="${Ln.gT}" width="${boxW + 16}" height="${140 + 20 * predicted.length}" style="pointer-events:none"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${boxW}px;margin:4px;background:var(--color-bg);border:1px solid var(--color-text);box-shadow:var(--shadow-md);padding:var(--space-2) var(--space-3);display:grid;grid-template-columns:1fr auto;gap:2px var(--space-3);font-size:12px">`
     + `<div style="grid-column:span 2;font-family:var(--font-heading);font-weight:600;font-size:15px">${time}</div>`
     + `<span style="color:var(--color-neutral-700)">Glucose</span><span>${p ? fmt(p.v) + ' ' + unit() : '–'}</span>`
+    + predicted.map(([m, q]) => `<span style="color:var(--color-neutral-700)">Predicted ${m} min ago</span><span>${q ? fmt(q.v) : '–'}</span>`).join('')
     + `<span style="color:var(--color-neutral-700)">Basal</span><span>${sg ? sg.rate.toFixed(2) + ' U/h' : '–'}</span>`
     + (state.showProfile ? `<span style="color:var(--color-neutral-700)">Profile</span><span>${sg ? sg.prof.toFixed(2) + ' U/h' : '–'}</span>` : '')
     + `<span style="color:var(--color-neutral-700)">COB</span><span>${cob ? Math.round(cob.v) + ' g' : '–'}</span>`
@@ -811,6 +851,8 @@ function renderOptions () {
   renderSeg('units', UNITS, unit());
   $('showProfile').checked = state.showProfile;
   $('legProfile').hidden = !state.showProfile;
+  $('showForecast').checked = state.showForecast;
+  $('legForecast').hidden = !state.showForecast;
 }
 
 function render () {
@@ -966,6 +1008,12 @@ function wireOptions () {
     state.showProfile = e.target.checked;
     store('profile', state.showProfile ? 1 : 0);
     $('legProfile').hidden = !state.showProfile;
+    render();
+  });
+  $('showForecast').addEventListener('change', (e) => {
+    state.showForecast = e.target.checked;
+    store('forecast', state.showForecast ? 1 : 0);
+    $('legForecast').hidden = !state.showForecast;
     render();
   });
   $('earlier').addEventListener('click', () => pan(span() / 2));

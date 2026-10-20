@@ -9,6 +9,8 @@ import { createApi2 } from './api2/index.js';
 import { createApi3 } from './api3/index.js';
 import { createSessionRoutes } from './web/session.js';
 import { createPredictionRoutes } from './predict/routes.js';
+import { ModelStore } from './predict/store.js';
+import { PredictionRecorder } from './predict/recorder.js';
 import { Following } from './sync/following.js';
 import { logRequests } from './monitoring/requests.js';
 
@@ -24,6 +26,9 @@ export async function createContext (config, pool) {
   // follower, ctx.follower; while there is one, the API refuses data changes.
   ctx.following = new Following(ctx, config.follow);
   await ctx.following.load();
+  // The server starts the recorder, which predicts for each new reading.
+  ctx.models = new ModelStore(pool);
+  ctx.predictions = new PredictionRecorder(ctx, ctx.models);
   return ctx;
 }
 

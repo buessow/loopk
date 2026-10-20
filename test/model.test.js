@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildModel, basalSegments, cobSeries, profileTimeline, tempBasals, eventSeries, gmiFromMmol, insulinPerDay, onBoard, timeInRanges, trendDirection, DAY, HOUR, MIN } from '../public/model.js';
+import { buildModel, basalSegments, cobSeries, forecastSeries, profileTimeline, tempBasals, eventSeries, gmiFromMmol, insulinPerDay, onBoard, timeInRanges, trendDirection, DAY, HOUR, MIN } from '../public/model.js';
 
 const profile = {
   defaultProfile: 'P',
@@ -121,4 +121,17 @@ test('buildModel converts mg/dL to mmol/L and windows events', () => {
   assert.equal(m.hr[0].v, 70);
   assert.deepEqual(m.cobSeries, []);
   assert.ok(m.basal.length > 0);
+});
+
+test('recorded predictions become one glucose series per lead time', () => {
+  const series = forecastSeries([
+    { minutes: 30, date: 2000, madeAt: 200, sgv: 90 },
+    { minutes: 15, date: 1000, madeAt: 100, sgv: 180 },
+    { minutes: 15, date: 500, madeAt: 50, sgv: 162 },
+    { minutes: 15, date: 700, sgv: null },
+  ]);
+  assert.deepEqual(Object.keys(series).sort(), ['15', '30']);
+  assert.deepEqual(series[15], [{ t: 500, v: 9, madeAt: 50 }, { t: 1000, v: 10, madeAt: 100 }]);
+  assert.deepEqual(series[30], [{ t: 2000, v: 5, madeAt: 200 }]);
+  assert.deepEqual(forecastSeries(), {});
 });

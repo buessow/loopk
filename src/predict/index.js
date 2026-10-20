@@ -168,23 +168,40 @@ export function predict (readings, { model, timeZone, minutes = [15, 30], past =
   };
 }
 
+/** Minutes of readings before the newest one that buildInputs may use. */
+export function historyMinutes (model) {
+  return (model.history + ANCHOR_SLOTS + 1) * model.slotMinutes;
+}
+
+/** SQL condition for the entries that are glucose readings the model uses. */
+export const VALID_SGV = `type = 'sgv' AND sgv BETWEEN ${SGV_MIN} AND ${SGV_MAX} AND date IS NOT NULL AND is_valid IS DISTINCT FROM false`;
+
+const reading = (r) => ({
+  date: new Date(r.date).getTime(),
+  sgv: r.sgv,
+  ...(r.utc_offset != null ? { utcOffset: r.utc_offset } : {}),
+});
+
+/** Readings with from <= date <= to (ms), oldest first. */
+export async function readingsBetween (pool, from, to) {
+  const { rows } = await pool.query(
+    `SELECT date, sgv, utc_offset FROM entries WHERE ${VALID_SGV} AND date >= $1 AND date <= $2 ORDER BY date`,
+    [new Date(from), new Date(to)]);
+  return rows.map(reading);
+}
+
+/** Date (ms) of the newest reading, or null. */
+export async function newestReading (pool) {
+  const { rows: [r] } = await pool.query(`SELECT max(date) AS date FROM entries WHERE ${VALID_SGV}`);
+  return r.date ? new Date(r.date).getTime() : null;
+}
+
 /**
  * Readings for a prediction: the newest one and the 2 h (and anchors) before
  * it, plus `pastMinutes` more for the predictions made that much earlier.
  */
 export async function recentReadings (pool, model, pastMinutes = 30) {
-  const minutes = (model.history + ANCHOR_SLOTS + 1) * model.slotMinutes + pastMinutes;
-  const { rows } = await pool.query(
-    `WITH g AS (
-       SELECT date, sgv, utc_offset FROM entries
-        WHERE type = 'sgv' AND sgv BETWEEN $1 AND $2 AND date IS NOT NULL AND is_valid IS DISTINCT FROM false)
-     SELECT date, sgv, utc_offset FROM g
-      WHERE date >= (SELECT max(date) FROM g) - make_interval(mins => $3)
-      ORDER BY date`,
-    [SGV_MIN, SGV_MAX, minutes]);
-  return rows.map((r) => ({
-    date: new Date(r.date).getTime(),
-    sgv: r.sgv,
-    ...(r.utc_offset != null ? { utcOffset: r.utc_offset } : {}),
-  }));
+  const minutes = historyMinutes(model) + pastMinutes;
+  const newest = await newestReading(pool);
+  return newest == null ? [] : readingsBetween(pool, newest - minutes * MIN, newest);
 }

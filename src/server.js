@@ -18,6 +18,7 @@ try {
   attachSockets(server, ctx);
   if (config.follow && !config.follow.token) console.warn('FOLLOW_URL needs FOLLOW_TOKEN, an access token on that server: not following it.');
   ctx.following.start();
+  ctx.predictions.start();
   server.listen(config.port, () => {
     console.log(`Loopk listening on ${config.baseUrl} (port ${config.port})`);
     if (config.authDisabled) console.warn('AUTH_DISABLED: the web UI is open to anyone who can reach this port, as admin.');
@@ -26,6 +27,7 @@ try {
 
   const shutdown = async () => {
     await ctx.following.stop();
+    await ctx.predictions.stop();
     server.close(() => pool.end().then(() => process.exit(0)));
     setTimeout(() => process.exit(0), 5000).unref();
   };

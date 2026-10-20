@@ -74,6 +74,21 @@ export function heartRateSeries (docs) {
     .sort((a, b) => a.t - b.t);
 }
 
+/**
+ * Recorded predictions (GET /api/prediction/history) as one series per lead
+ * time, at the time predicted for: { 15: [{ t, v (mmol/L), madeAt }], 30: [...] }.
+ */
+export function forecastSeries (docs = []) {
+  const out = {};
+  for (const d of docs) {
+    const v = num(d.sgv);
+    if (typeof d.date !== 'number' || v == null) continue;
+    (out[d.minutes] ||= []).push({ t: d.date, v: v / MGDL_PER_MMOL, madeAt: d.madeAt });
+  }
+  for (const k of Object.keys(out)) out[k].sort((a, b) => a.t - b.t);
+  return out;
+}
+
 /** Carbs on board (g) reported by AAPS / Loop device-status records. */
 export function cobSeries (docs) {
   return docs
@@ -280,7 +295,7 @@ export function onBoard (devicestatus, now = Date.now()) {
 }
 
 /** Assembles everything the page draws for [start, now] (default: the last `hours`). */
-export function buildModel ({ entries, treatments, heartrate, devicestatus, profile, switchesBefore = [], now = Date.now(), hours = 24, start = now - hours * HOUR }) {
+export function buildModel ({ entries, treatments, heartrate, devicestatus, predictions, profile, switchesBefore = [], now = Date.now(), hours = 24, start = now - hours * HOUR }) {
   const end = now;
   const g = glucoseSeries(entries).filter((p) => p.t >= start - 6 * HOUR);
   const hr = heartRateSeries(heartrate);
@@ -288,5 +303,5 @@ export function buildModel ({ entries, treatments, heartrate, devicestatus, prof
   const switches = [...switchesBefore, ...treatments.filter((d) => /Profile Switch$/.test(d.eventType || ''))];
   const timeline = profileTimeline(profile, switches);
   const basal = basalSegments({ start, end, timeline, temps: tempBasals(treatments) });
-  return { start, end, g, hr, cobSeries: cobSeries(devicestatus), events, basal, ...onBoard(devicestatus, now) };
+  return { start, end, g, hr, forecast: forecastSeries(predictions), cobSeries: cobSeries(devicestatus), events, basal, ...onBoard(devicestatus, now) };
 }

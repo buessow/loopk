@@ -2,7 +2,8 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import request from 'supertest';
-import { buildInputs, interpolate, predict, run, zoneOffset } from '../src/predict/index.js';
+import { buildInputs, interpolate, newestReading, predict, readingsBetween, run, zoneOffset } from '../src/predict/index.js';
+import { PredictionRecorder } from '../src/predict/recorder.js';
 import { modelProblems } from '../src/predict/store.js';
 import { startServer, tokenFor } from './helpers.js';
 
@@ -161,4 +162,44 @@ test('a newer upload replaces the model in use', async () => {
   await request(s.app).put('/api/prediction/model').set(auth(uploader)).send(next).expect(201);
   const info = await request(s.app).get('/api/prediction/model').set(auth(reader)).expect(200);
   assert.equal(info.body.version, 'random-test-model-2');
+});
+
+test('predictions are recorded once per reading and returned by the history', async () => {
+  const recorded = await s.ctx.predictions.record();
+  assert.ok(recorded > 0 && recorded % 2 === 0, `${recorded} rows`);
+  assert.equal(await s.ctx.predictions.record(), 0);
+
+  const newest = await newestReading(s.ctx.pool);
+  const res = await request(s.app).get(`/api/prediction/history?from=${newest - 3600000}&to=${newest + 3600000}`)
+    .set(auth(reader)).expect(200);
+  const latest = res.body.filter((p) => p.madeAt === newest);
+  assert.deepEqual(latest.map((p) => p.minutes), [15, 30]);
+  const live = predict(await readingsBetween(s.ctx.pool, newest - 4 * 3600000, newest), { model: { ...model, version: 'random-test-model-2' } });
+  for (const p of latest) {
+    const q = live.predictions.find((x) => x.minutes === p.minutes);
+    assert.equal(p.date, q.date);
+    assert.equal(p.sgv, q.sgv);
+  }
+  assert.ok(res.body.every((p, i) => !i || res.body[i - 1].date <= p.date));
+  await request(s.app).get('/api/prediction/history?from=0').set(auth(reader)).expect(400);
+  await request(s.app).get('/api/prediction/history').set(auth(uploader)).expect(403);
+
+  const writer = await tokenFor(s.ctx, 'aaps-next');
+  await addReadings(writer, newest + 5 * 60000, [120]);
+  assert.equal(await s.ctx.predictions.record(), 2);
+});
+
+test('a started recorder records when new readings arrive', async () => {
+  const recorder = new PredictionRecorder(s.ctx, s.ctx.models, { delayMs: 10 });
+  const newest = await newestReading(s.ctx.pool);
+  recorder.start();
+  try {
+    const writer = await tokenFor(s.ctx, 'aaps-live');
+    await addReadings(writer, newest + 5 * 60000, [118]);
+    const count = async () => (await s.ctx.pool.query('SELECT count(*)::int AS n FROM glucose_predictions WHERE made_at = $1', [new Date(newest + 5 * 60000)])).rows[0].n;
+    for (let i = 0; i < 100 && await count() < 2; i++) await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(await count(), 2);
+  } finally {
+    await recorder.stop();
+  }
 });
