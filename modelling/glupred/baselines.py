@@ -58,7 +58,7 @@ def aaps_decisions(decisions, index, fill=1):
     """AAPS's decision values per grid slot (mg/dL), from the newest loop in
     each slot and carried forward up to `fill` slots: min_guard, min_pred,
     eventual, threshold, lgs (it suspended because min_guard or glucose
-    was below threshold) and isf (mg/dL per U, as AAPS used it)."""
+    was below threshold), isf (mg/dL per U, as AAPS used it) and cr (g per U)."""
     first = to_minutes(index[:1])[0]
     slot = (to_minutes(decisions['date']) - first) // SLOT_MIN
     ok = (slot >= 0) & (slot < len(index))
@@ -66,12 +66,14 @@ def aaps_decisions(decisions, index, fill=1):
     # Reasons are in the user's units; a target above 30 means mg/dL.
     factor = np.where(d['target'].to_numpy() > 30, 1.0, 18.0)
     out = pd.DataFrame(index=np.arange(len(index)),
-                       columns=['min_guard', 'min_pred', 'eventual', 'threshold', 'lgs', 'isf'], dtype=float)
+                       columns=['min_guard', 'min_pred', 'eventual', 'threshold', 'lgs', 'isf', 'cr'], dtype=float)
     s = d['slot'].to_numpy()
     out.loc[s, 'min_guard'] = d['min_guard'].to_numpy() * factor
     out.loc[s, 'min_pred'] = d['min_pred'].to_numpy() * factor
     out.loc[s, 'eventual'] = d['eventual_bg'].to_numpy()
     out.loc[s, 'isf'] = d['isf'].to_numpy() * factor  # mg/dL per U
+    if 'cr' in d:
+        out.loc[s, 'cr'] = d['cr'].to_numpy()
     # 0 rather than NaN so filling only reaches slots without a loop.
     out.loc[s, 'threshold'] = d['lgs_threshold'].fillna(0).to_numpy() * factor
     out.loc[s, 'lgs'] = d['lgs_threshold'].notna().to_numpy().astype(float)

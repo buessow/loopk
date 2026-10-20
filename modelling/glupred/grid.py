@@ -145,6 +145,42 @@ def _slot_mean(slot_index, values, n):
         return np.where(count > 0, total / np.maximum(count, 1), np.nan)
 
 
+DUPLICATE_SECONDS = 60
+
+
+def dedupe(records, column, tolerance):
+    """Records without a second one of the same amount (within `tolerance`)
+    within a minute; the record kept is marked SMB if either was (when there
+    is an `smb` column).
+
+    Late 2019 to 2020 every SMB also came as a pump-synced correction about a
+    second later, and about half the carb entries came twice; in 2025 some
+    boluses came twice. Real SMBs are at least 3 minutes apart."""
+    b = records.sort_values('date', kind='stable').reset_index(drop=True)
+    keep = np.ones(len(b), dtype=bool)
+    smb = b['smb'].fillna(False).to_numpy(dtype=bool).copy() if 'smb' in b else None
+    t = (b['date'] - pd.Timestamp(0, tz='UTC')).dt.total_seconds().to_numpy()
+    u = b[column].to_numpy()
+    j = 0
+    for i in range(1, len(b)):
+        # Compare with the earlier kept records of the last minute.
+        while t[i] - t[j] > DUPLICATE_SECONDS:
+            j += 1
+        for k in range(j, i):
+            if keep[k] and abs(u[k] - u[i]) < tolerance:
+                keep[i] = False
+                if smb is not None:
+                    smb[k] |= smb[i]
+                break
+    if smb is not None:
+        b = b.assign(smb=smb)
+    return b[keep]
+
+
+def dedupe_boluses(b):
+    return dedupe(b, 'insulin', 0.011)
+
+
 def build_grid(data):
     g = data['glucose']
     first = to_minutes(g['date'][:1])[0] // SLOT_MIN * SLOT_MIN
@@ -175,10 +211,11 @@ def build_grid(data):
 
     idx, ok = slot_of(g['date'])
     glucose = _slot_mean(idx[ok], g['sgv'].to_numpy()[ok], n)
-    b = data['boluses']
+    b = dedupe_boluses(data['boluses'])
     idx, ok = slot_of(b['date'])
     bolus = _slot_sum(idx[ok], b['insulin'].to_numpy()[ok], n) + extra_min.reshape(n, SLOT_MIN).sum(axis=1)
-    c = data['carbs']
+    smb = _slot_sum(idx[ok], (b['insulin'] * b['smb']).to_numpy(dtype=float)[ok], n)
+    c = dedupe(data['carbs'], 'carbs', 0.5)
     idx, ok = slot_of(c['date'])
     carbs = _slot_sum(idx[ok], c['carbs'].to_numpy()[ok], n)
     h = data['heartrate']
@@ -190,6 +227,7 @@ def build_grid(data):
     return pd.DataFrame({
         'glucose': glucose,
         'bolus': bolus,
+        'smb': smb,
         'basal': basal_min.reshape(n, SLOT_MIN).sum(axis=1),
         'profile_basal': (profile / 60).reshape(n, SLOT_MIN).sum(axis=1),
         'carbs': carbs,

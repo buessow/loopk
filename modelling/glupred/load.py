@@ -24,9 +24,16 @@ QUERIES = {
          WHERE type = 'sgv' AND date IS NOT NULL AND sgv BETWEEN {SGV_MIN} AND {SGV_MAX}
          ORDER BY date""",
 
-    # Boluses, including SMBs; priming is not delivered to the body.
+    # Boluses, including SMBs; priming is not delivered to the body. `smb`:
+    # decided by AAPS. Marked as type SMB or is_smb, except from late 2023
+    # to early 2025, when they came only as synced "Correction Bolus"
+    # records (about 0.3 U, none near a marked SMB).
     'boluses': """
-        SELECT date, insulin FROM treatments
+        SELECT date, insulin,
+               type = 'SMB' OR coalesce(is_smb, false)
+                 OR (entered_by = 'sync' AND event_type = 'Correction Bolus'
+                     AND date >= '2023-10-01' AND date < '2025-04-01') AS smb
+          FROM treatments
          WHERE insulin > 0 AND date IS NOT NULL
            AND coalesce(type, '') NOT IN ('PRIMING', 'FAKE_EXTENDED')
            AND coalesce(event_type, '') <> 'Combo Bolus'
@@ -100,6 +107,7 @@ QUERIES = {
         SELECT date, suggested_bg AS bg, suggested_eventual_bg AS eventual_bg,
                substring(suggested_reason FROM 'Target: (-?[0-9.]+)')::float AS target,
                substring(suggested_reason FROM 'ISF: (-?[0-9.]+)')::float AS isf,
+               substring(suggested_reason FROM 'CR: (-?[0-9.]+)')::float AS cr,
                substring(suggested_reason FROM 'minPredBG (-?[0-9.]+)')::float AS min_pred,
                substring(suggested_reason FROM 'minGuardBG (-?[0-9.]+),')::float AS min_guard,
                substring(suggested_reason FROM 'minGuardBG -?[0-9.]+ ?< ?(-?[0-9.]+)')::float AS lgs_threshold
