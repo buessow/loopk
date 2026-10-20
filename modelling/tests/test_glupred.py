@@ -105,3 +105,28 @@ def test_sport_inputs_count_recorded_minutes_and_time_since():
     assert X['sport_since_h'].iloc[111] == 0 and X['sport_since_h'].iloc[123] == 1.0
     assert X['sport_since_h'].iloc[50] == 24.0
     assert 'sport_1h' not in build_features(grid)[0]
+
+
+def test_usual_targets_sum_the_window_after_the_slot():
+    from glupred.usual import ahead, behind
+    a = np.array([1.0, 2, 3, 4, 5])
+    assert np.allclose(ahead(a, 2)[:3], [5, 7, 9]) and np.isnan(ahead(a, 2)[3:]).all()
+    assert np.allclose(behind(a, 2), [1, 3, 5, 7, 9])
+
+
+def test_a_second_record_of_the_same_dose_within_a_minute_is_dropped():
+    from glupred.grid import dedupe_boluses
+    t = pd.Timestamp('2020-03-01T12:00:00Z')
+    b = pd.DataFrame({'date': [t, t + pd.Timedelta('1s'), t + pd.Timedelta('20s'), t + pd.Timedelta('4min')],
+                      'insulin': [0.3, 0.3, 1.0, 0.3], 'smb': [False, True, False, True]})
+    kept = dedupe_boluses(b)
+    assert kept['insulin'].tolist() == [0.3, 1.0, 0.3]
+    assert kept['smb'].tolist() == [True, False, True]
+
+
+def test_duplicate_carb_entries_are_dropped():
+    from glupred.grid import dedupe
+    t = pd.Timestamp('2020-03-01T12:00:00Z')
+    c = pd.DataFrame({'date': [t, t + pd.Timedelta('2s'), t + pd.Timedelta('10s'), t + pd.Timedelta('5min')],
+                      'carbs': [30.0, 30.0, 10.0, 30.0]})
+    assert dedupe(c, 'carbs', 0.5)['carbs'].tolist() == [30.0, 10.0, 30.0]

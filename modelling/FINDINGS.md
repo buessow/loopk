@@ -41,6 +41,12 @@ percentage points, between training runs.
     alarms a week, versus 69% and 18 for the AAPS IOB curve. But only about
     63% of lows are announced at least 15 minutes ahead, which is the main
     thing to improve.
+- **Your actions:** whether you eat is predictable from the time of day
+  when glucose is normal (AUC 0.83), but close to random when falling toward
+  a low. Manual boluses follow clear rules (meals; corrections above 180,
+  above 120 when rising, above 160 when falling slowly, and at night above
+  120), which explain 95% of them. The amounts, and AAPS's own SMBs and temp
+  basals, are hard to predict.
 - Highs (above 180) happen about 3 times a day, mostly after meals. No
   method predicts a rise before it starts. Once glucose is rising, high
   warnings work well, and while coming down from a high the model predicts
@@ -52,6 +58,15 @@ percentage points, between training runs.
 - **Data:** sensor glucose, boluses (including SMBs), temp basals, profile
   switches and profiles, extended boluses, carbs, heart rate, and AAPS's
   predicted curves, read from Postgres (`glupred/load.py`).
+- **Duplicate boluses:** from late 2019 to 2020, almost every SMB was also
+  stored as a pump-synced "Correction Bolus" about a second later, and in
+  2025 about 1,000 boluses came twice. A second record of the same dose
+  within a minute is dropped (real SMBs are at least 3 minutes apart). This
+  brings 2019–2020 insulin from about 58 to 40 U/day, in line with later
+  years. Accuracy at 15 and 30 minutes barely changed (within 0.3 mg/dL);
+  the 1–4 h model and the what-if physics have not been rerun yet.
+- **SMBs** are marked as type SMB or `is_smb`, except from late 2023 to
+  early 2025, when they came only as synced "Correction Bolus" records.
 - **Grid:** everything is put on a 5-minute grid. Basal delivery is
   integrated per minute from the profile in effect and the temp basals.
   `rate` is the absolute rate also for percent temps, and a temp basal
@@ -68,7 +83,9 @@ percentage points, between training runs.
   - time of day
 - **Split by time:** train 2019-05 – 2024-12; validation 2025-01 – 2025-06
   (early stopping and thresholds); test 2025-07 – 2026-10 (reported).
-- **Unlogged rescue carbs:** carbs are logged for only 19–40% of lows. When
+- **Unlogged rescue carbs:** carbs are logged for only 19–40% of lows
+  around the drop itself (34–61% when counting until glucose is back above
+  70, see "Usual actions"). When
   glucose falls below 70 after 30 minutes above it, and no carbs were logged
   in the previous 30 minutes, 15 g is assumed eaten. The rule uses only the
   past, so live predictions can apply it too.
@@ -531,6 +548,79 @@ in `build_features(..., sport=True)` but off by default. Likely reasons:
 - A delayed low after sport depends on how hard it was, which a mean heart
   rate captures poorly.
 
+## Usual actions: eating and boluses
+
+Can a forecast state what it assumes ("lands at 95 in 1 h if you eat about
+15 g as usual")? `usual.py` predicts, for the next 30, 60 and 120 minutes,
+whether carbs are logged (5 g or more), how many grams, and the insulin
+delivered beyond the profile basal. Gradient boosting, test period.
+
+**Eating is predictable as an event, not in grams.** Whether you eat within
+30 minutes: AUC 0.80 (time of day and week alone: 0.70). How many grams:
+only 9–19% of the variation explained. The probabilities hold up to about
+30%; above that they run high (a predicted 57% is about 37%).
+
+By the situation at the prediction time (30 minutes ahead):
+
+| Situation (share of time) | Eats | + assumed rescue carbs | AUC: time / glucose + time / everything |
+|---|---|---|---|
+| < 70 (2%) | 18% | 18% | 0.57 / 0.58 / 0.63 |
+| 70–80, falling (3%) | 20% | 45% | 0.57 / 0.60 / 0.63 |
+| 80–180, steady (44%) | 7% | 7% | 0.79 / 0.81 / 0.83 |
+| 80–180, rising 10+ (17%) | 8% | 8% | 0.70 / 0.75 / 0.84 |
+| > 180, rising (7%) | 3% | 3% | 0.65 / 0.63 / 0.81 |
+
+- With steady normal glucose, meals are well predicted, almost entirely from
+  the time of day.
+- Falling toward a low, it is close to a coin toss whether carbs follow.
+- Above 180 and rising, eating is rare, and the model knows it; carbs and
+  insulin already given help to tell the exceptions.
+
+**Lows without logged carbs.** For 59% of the 705 lows in the test period,
+no carbs were logged from 30 minutes before the drop below 70 until 15
+minutes after it was back above 70 (39–66% per year since 2019). Looking
+back 60 or 90 minutes changes this little (56%, 53%). Lows with and without
+logged carbs are equally deep (median 61) and nearly as long (15 vs 20
+minutes), so many probably had carbs that were not logged.
+
+- Over all years, carbs were logged more often with more insulin on board
+  (41% when suspended, 55% at 1–2 U) and much less often at night (33% vs
+  47–58% by day).
+- Since July 2025 neither matters: about 40% at every insulin level, 44% at
+  night. With more than 2 U on board, lows are deepest (median 58) but carbs
+  are logged for only 36%.
+
+**Manual boluses follow clear rules.** Since July 2025, 3,155 manual
+boluses (SMBs excluded):
+
+| Reason | Share |
+|---|---|
+| Meal (carbs from 30 min before to 60 min after) and a correction | 31% |
+| Correction above 180 | 29% |
+| Correction above 120 and rising | 19% |
+| Meal only | 13% |
+| Correction at night (0–7 h) above 120, for in-range glucose at breakfast | 2% |
+| Correction above 160, falling slowly | 2% |
+| None of these | 5% |
+
+Of the 5%, about half have carbs within 2 h before or 3 h after; 2% of
+manual boluses have no visible reason. These rules have explained 86–96%
+of manual boluses in every year since 2019.
+
+**Insulin is hard to predict in amount.** Share of the variation explained
+(everything as inputs): all insulin beyond the profile 27% / 25% / 22% at
+30 / 60 / 120 minutes; AAPS's SMBs and temp basals 23% / 16% / 6%; manual
+boluses 13% / 16% / 19%. With only glucose and time as inputs, AAPS's next
+30 minutes is 15% explained: AAPS works from its own IOB, COB, targets and
+autosens, so the glucose model learns AAPS's average effect, not its
+decisions.
+
+**Consequence for an "on the right path" forecast:** "as usual" assumptions
+are too vague to steer by, and whether you eat at a low is close to random.
+Better: the "if nothing is eaten" forecast the 4 h model already gives, plus
+the physics effect of the options ("no carbs: 68 in 1 h; 10 g: 95; 20 g:
+120"), with AAPS's average reaction to extra carbs estimated from past meals.
+
 ## Server model (15 and 30 minutes)
 
 The loopk server predicts glucose 15 and 30 minutes after the newest
@@ -555,6 +645,12 @@ compared for these horizons (test MAE in mg/dL):
 - **Low warning** ("low likely within 30 min"), at P ≥ 0.4: 90% of lows are
   announced, 61% at least 15 minutes ahead, with about 14 false alarms a
   week. At 0.3, 94% are announced, but with 19 false alarms a week.
+- **Lows and highs are where it fails:** at 30 minutes it predicts too high
+  before lows (bias +26 mg/dL when the actual value is below 70) and too low
+  in highs (−25 at 180–250, −47 above 250). Its predicted value falls below
+  70 for only 12% of actual lows, which is why the low probability is a
+  separate output. Insulin and carb inputs do not change this; carbs help
+  only in the hour after a meal (P90 at 30 minutes 53 → 48 mg/dL).
 - `modelling/export.py` trains it and uploads it (`--upload`) with an
   "Upload model" access token. The server stores models in the database and
   uses the newest. Every model bundles checks: synthetic readings with the
@@ -589,5 +685,9 @@ compared for these horizons (test MAE in mg/dL):
    rate does. A planned activity entered in advance would give the model the
    information it lacks at the start of a session.
 5. **Server prediction:** done for 15 and 30 minutes from glucose alone
-   (see "Server model"). Next: insulin inputs, longer horizons, and a chart
-   overlay.
+   (see "Server model"), recorded for every reading and shown in the chart.
+6. **"Am I on the right path":** a forecast of what happens if nothing is
+   eaten, with the effect of 10 or 20 g added by physics and AAPS's average
+   reaction to carbs estimated from past meals. Check it on meals with
+   natural variation in grams. Rerun the 1–4 h model and the what-if
+   physics on the deduplicated insulin data first.
