@@ -650,39 +650,78 @@ the physics effect of the options ("no carbs: 68 in 1 h; 10 g: 95; 20 g:
 ## Server model (15 and 30 minutes)
 
 The loopk server predicts glucose 15 and 30 minutes after the newest
-reading (`GET /api/prediction`, shown under the current glucose). Inputs
-compared for these horizons (test MAE in mg/dL):
+reading (`GET /api/prediction`, shown under the current glucose, and
+recorded for every reading for the chart). Since 2026-10-20 it is the
+benchmark candidate **server-insulin-carbs-synthetic**:
 
-| Inputs | 15 min | 30 min |
-|---|---|---|
-| Glucose (last 2 h) + time of day | 10.4 | 18.4 |
-| + heart rate | 10.3 | 18.4 |
-| + AAPS's logged IOB and insulin activity | 10.2 | 18.0 |
-| + heart rate and own insulin model | 10.0 | 17.3 |
-| + own insulin and carb models (full) | 9.9 | 17.2 |
+- **Inputs:** 2 hours of glucose, its mean over the last 1, 3 and 7 days,
+  the time of day, and insulin and carbs. For insulin and carbs: activity
+  in the past slots, committed for the next 30 minutes, and on board. Also
+  the profile basal rate, and the assumed rescue carbs.
+- **Training:** real samples plus the three kinds of synthetic insulin
+  copies (see "Synthetic insulin data"), all outcomes (also after eating),
+  calibrated on validation data.
+- **Without insulin records** in the last 6 hours, the server gives no
+  prediction, as training skipped such samples.
 
-- **The server uses glucose and time of day only.** Insulin is worth about
-  1 mg/dL at 30 minutes. Computing it would mean porting the basal, profile
-  and temp-basal timeline to the server. Carbs and heart rate add nothing
-  at these horizons.
-- **Accuracy (test):** Clarke zone A 92% at 15 minutes and 77% at 30
-  minutes. The 10th–90th percentile range holds the actual value 77% of the
-  time, against the nominal 80%.
-- **Low warning** ("low likely within 30 min"), at P ≥ 0.4: 90% of lows are
-  announced, 61% at least 15 minutes ahead, with about 14 false alarms a
-  week. At 0.3, 94% are announced, but with 19 false alarms a week.
-- **Lows and highs are where it fails:** at 30 minutes it predicts too high
-  before lows (bias +26 mg/dL when the actual value is below 70) and too low
-  in highs (−25 at 180–250, −47 above 250). Its predicted value falls below
-  70 for only 12% of actual lows, which is why the low probability is a
-  separate output. Insulin and carb inputs do not change this; carbs help
-  only in the hour after a meal (P90 at 30 minutes 53 → 48 mg/dL).
+Columns of the comparison below, all on the test period:
+
+- **MAE 15 / 30 min:** mean absolute error in mg/dL, on the slots with an
+  AAPS IOB curve (as in "Standard benchmark"). Lower is better.
+- **Low warning at 7 alarms a week, caught %:** share of lows warned of
+  within 45 minutes before (30-minute warning). Higher is better.
+- **+2 U now, wrong direction %:** share of samples where 2 more units raise
+  the 30-minute forecast. Lower is better.
+- **80% band holds %:** share of actual values within the 10th–90th
+  percentile band at 30 minutes. 80 is right.
+
+| Model | MAE 15 min | MAE 30 min | Low warning at 7 alarms a week, caught % | +2 U now, wrong direction % | 80% band holds % |
+|---|---|---|---|---|---|
+| server (glucose and time of day, until 2026-10-20) | 10.0 | 18.0 | 48.5 | – | 76.8 |
+| server-level | 9.9 | 17.7 | 49.1 | – | 77.5 |
+| server-insulin-synthetic | 9.9 | 17.8 | 45.2 | 5.5 | 76.9 |
+| **server-insulin-carbs-synthetic** | **9.7** | **17.2** | **48.0** | **0.1** | **77.4** |
+
+- Insulin without carbs is no better than glucose alone: insulin goes with
+  meals, and without the carbs the network cannot tell a meal bolus from a
+  correction. With carbs, the 30-minute error drops by 0.8 mg/dL.
+- The forecast now responds to a dose: 2 more units lower it by 6.9 mg/dL at
+  30 minutes (the measured effect is 8), and removing a recent meal bolus
+  raises it by 32.
+- **Low warning** ("low likely within 30 min") at a probability of 0.3 or
+  more. On all test slots, the model `export.py` trained, these columns:
+  - **announced %:** share of lows with a warning in the 30 minutes before
+    them. Higher is better.
+  - **≥ 15 min ahead %:** share warned at least 15 minutes before. Higher
+    is better.
+  - **false alarms / week:** alarms not followed by a low. Lower is better.
+
+  | Threshold | Announced % | ≥ 15 min ahead % | False alarms / week |
+  |---|---|---|---|
+  | 0.2 | 94.5 | 75.6 | 18.8 |
+  | **0.3 (in use)** | **88.0** | **64.3** | **13.5** |
+  | 0.4 | 79.8 | 48.9 | 9.0 |
+
+  The glucose-only model announced 90% (61% at least 15 minutes ahead)
+  with 14 false alarms a week at its threshold of 0.4.
+- **Accuracy of the exported model** (all 125,616 valid test slots, not only
+  those with an AAPS curve): MAE 10.1 / 17.6 mg/dL at 15 / 30 minutes,
+  Clarke zone A 92% / 78%, 80% band holds 77% / 78%.
+- **Lows and highs are still where it fails:** at 30 minutes it predicts
+  too high when the actual value is below 70 (bias +30 mg/dL) and too low
+  when it is above 180 (bias −21).
 - `modelling/export.py` trains it and uploads it (`--upload`) with an
   "Upload model" access token. The server stores models in the database and
-  uses the newest. Every model bundles checks: synthetic readings with the
-  Python outputs. The server refuses an upload whose checks don't come out
-  the same within 0.001 mg/dL. The server test `test/predict.test.js` runs
-  the same comparison on a random network of the same shape.
+  uses the newest. The model ships its insulin and carb curves and the rules
+  for duplicates and rescue carbs. The server rebuilds the 5-minute grid
+  from the raw records as `glupred/grid.py` does (`src/predict/grid.js`):
+  profile switches and stored profiles, temp basals, extended boluses,
+  duplicate boluses and carbs. Every model bundles checks: synthetic
+  readings and treatments with the Python outputs. The server refuses an
+  upload whose checks don't come out the same within 0.001 mg/dL. On 12
+  real moments from 2025–26, the server's inputs matched Python's within
+  1e-6. The server test `test/predict.test.js` runs the same comparison on a
+  random network of the same shape.
 
 ## Standard benchmark
 
@@ -1045,8 +1084,10 @@ because daytime corrections come with unlogged food.
    database), and AAPS exercise temporary targets, may say more than heart
    rate does. A planned activity entered in advance would give the model the
    information it lacks at the start of a session.
-5. **Server prediction:** done for 15 and 30 minutes from glucose alone
-   (see "Server model"), recorded for every reading and shown in the chart.
+5. **Server prediction:** done for 15 and 30 minutes from glucose, its level,
+   insulin and carbs, with synthetic insulin data (see "Server model").
+   Next: retrain on recent data before each upload (the export trains up to
+   2024 and validates on 2025-H1), and benchmark a 1-hour server model.
 6. **"Am I on the right path":** a forecast of what happens if nothing is
    eaten, with the effect of 10 or 20 g added by physics and AAPS's average
    reaction to carbs estimated from past meals. Check it on meals with

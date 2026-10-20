@@ -56,9 +56,12 @@ uv run pytest
   every model test.
 - `synthetic.py`, `corrections.py`, `periods.py`, `architectures.py` —
   synthetic insulin data, correction effect, bias by period, network shapes.
-- `export.py` — trains the server model, writes `results/model.json` (not
+- `export.py` — trains the server model (glucose, its level, insulin and
+  carbs, with synthetic insulin data), writes `results/model.json` (not
   committed) and the parity fixture `../test/fixtures/prediction.json`
-  (synthetic readings, random network). `--upload [URL]` also uploads it.
+  (synthetic readings and treatments, random network; `--fixture-only`
+  writes just that). `--upload [URL]` also uploads it. The server rebuilds
+  the inputs from the raw records in `src/predict/grid.js` and `index.js`.
 - `upload.py` — uploads a model file (default `results/model.json`) to a
   loopk server. `--url` and `--token`, or `LOOPK_URL` and
   `LOOPK_MODEL_TOKEN`; the token is an "Upload model" access token from the

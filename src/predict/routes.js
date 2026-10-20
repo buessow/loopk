@@ -1,6 +1,6 @@
 import express from 'express';
 import { UPLOAD_MODEL } from '../auth/index.js';
-import { predict, recentReadings } from './index.js';
+import { predict, recentRecords } from './index.js';
 import { modelInfo, modelProblems } from './store.js';
 import { recordedPredictions } from './recorder.js';
 
@@ -30,7 +30,8 @@ export function createPredictionRoutes (ctx) {
   router.get('/', ctx.auth.require('api:entries:read', READ), h(async (req, res) => {
     const row = await store.current();
     if (!row) return res.json({ available: false, reason: 'no prediction model uploaded' });
-    res.json(predict(await recentReadings(ctx.pool, row.model), { model: row.model }));
+    const { readings, treatments } = await recentRecords(ctx.pool, row.model);
+    res.json(predict(readings, { model: row.model, treatments }));
   }));
 
   router.get('/history', ctx.auth.require('api:entries:read', READ), h(async (req, res) => {

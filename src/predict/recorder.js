@@ -4,7 +4,7 @@
 // prediction are caught up too: after a model upload, a restart or a
 // backlog upload from the phone.
 
-import { buildInputs, historyMinutes, newestReading, readingsBetween, run, VALID_SGV } from './index.js';
+import { buildInputs, historyMinutes, newestReading, readingsBetween, run, treatmentMinutes, treatmentsBetween, VALID_SGV } from './index.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -84,6 +84,10 @@ export class PredictionRecorder {
     const dates = rows.map((r) => new Date(r.date).getTime());
     const span = historyMinutes(model) * MIN;
     const readings = await readingsBetween(pool, dates[0] - span, dates[dates.length - 1]);
+    const slotMs = model.slotMinutes * MIN;
+    const treatments = treatmentMinutes(model)
+      ? await treatmentsBetween(pool, dates[0] - treatmentMinutes(model) * MIN, (Math.floor(dates[dates.length - 1] / slotMs) + 1) * slotMs)
+      : {};
 
     const out = { madeAt: [], minutes: [], date: [], sgv: [], low: [], high: [] };
     let first = 0;
@@ -92,7 +96,7 @@ export class PredictionRecorder {
       // The readings up to t that buildInputs may use.
       while (readings[first].date < t - span) first++;
       while (last < readings.length && readings[last].date <= t) last++;
-      const built = buildInputs(readings.slice(first, last), { model });
+      const built = buildInputs(readings.slice(first, last), { model, treatments });
       if (!built.inputs) continue;
       const p = run(built.inputs, model);
       for (const m of this.minutes) {
