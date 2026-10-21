@@ -1,0 +1,70 @@
+/* The reports page (reports.html): period controls and a GridStack grid of widgets. */
+:root {
+  --range-very-low: var(--bg-low);
+  --range-low: color-mix(in srgb, var(--bg-low) 55%, var(--color-bg));
+  --range-target: var(--bg-ok);
+  --range-high: color-mix(in srgb, var(--bg-high) 55%, var(--color-bg));
+  --range-very-high: var(--bg-high);
+  --chart-basal: var(--color-accent-400);
+  --chart-bolus: var(--color-accent-700);
+  --chart-line: var(--color-accent);
+}
+
+.report-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.report-controls .seg-scroll { min-width: 0; }
+.report-controls[hidden], .report-dates[hidden] { display: none; }
+.report-dates { display: inline-flex; align-items: center; gap: var(--space-2); }
+.report-dates .input { width: auto; }
+.report-spacer { flex: 1; }
+.report-note { font-size: 12px; margin: 0; }
+
+.reports-page:not(.editing) .edit-only { display: none; }
+
+.grid-stack { min-height: 80px; }
+.widget {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-divider);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+.editing .widget { border-style: dashed; }
+.editing .widget-head { cursor: move; }
+.widget-head { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.widget-title {
+  margin: 0; flex: 1; min-width: 0;
+  font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-700);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.widget-period { font-size: 11px; color: var(--color-neutral-600); white-space: nowrap; }
+.widget-actions { display: flex; gap: var(--space-1); }
+.widget-actions .btn { font-size: 12px; min-height: 0; padding: 2px var(--space-1); }
+/* Chart.js sizes its canvas to this box (responsive, no fixed aspect ratio). */
+.widget-body { position: relative; flex: 1; min-height: 0; }
+
+.widget-number { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-4); height: 100%; align-content: center; }
+.widget-number b { font-family: var(--font-heading); font-weight: 600; font-size: 40px; line-height: 1; }
+.widget-number .unit { font-size: 13px; color: var(--color-neutral-700); }
+.widget-number .part { display: flex; flex-direction: column; }
+.widget-number .part b { font-size: 26px; }
+.widget-number .part span { font-size: 11px; color: var(--color-neutral-700); }
+.widget-empty { display: grid; place-items: center; height: 100%; font-size: 13px; color: var(--color-neutral-600); }
+
+.widget-table { position: absolute; inset: 0; overflow: auto; }
+.widget-table .table { font-size: 13px; }
+.widget-table td:not(:first-child), .widget-table th:not(:first-child) { text-align: right; }
+
+.widget-dialog {
+  width: min(420px, calc(100% - 32px)); padding: var(--space-4);
+  border: 1px solid var(--color-divider); background: var(--color-surface); color: var(--color-text);
+  box-shadow: var(--shadow-lg);
+}
+.widget-dialog::backdrop { background: color-mix(in srgb, var(--color-neutral-900) 45%, transparent); }
+.widget-dialog form { display: flex; flex-direction: column; gap: var(--space-3); }
+.widget-dialog h4 { margin: 0; }
+.widget-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin: 0; padding: 0; }
+
+/* GridStack's placeholder while moving or resizing a widget. */
+.grid-stack .grid-stack-placeholder > .placeholder-content {
+  border: 1px dashed var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}

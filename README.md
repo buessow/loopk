@@ -22,6 +22,15 @@ the selected glucose range, derives charts and insulin metrics locally, and
 caches recent collection data in IndexedDB. On later visits it paints the cache
 first, then requests only changes after its stored history cursor.
 
+The reports page (`/reports`) is a dashboard each signed-in person arranges
+themselves: widgets showing one metric (time in ranges, mean glucose, GMI,
+variability, insulin, carbs, heart rate) as a number, chart or table, over the
+whole period or by day, week, month, year, hour of day or weekday. The server
+sends hourly totals (`GET /api/reports/hours`, `src/reports/`), with basal
+integrated from the profile and temp basals; the page adds them up
+(`public/reports-model.js`). Each person's layout is stored in
+`report_dashboards`. GridStack and Chart.js are vendored in `public/vendor/`.
+
 During a Nightscout migration, configure `FOLLOW_URL` and `FOLLOW_TOKEN`.
 Loopk imports history from that server and listens for its live storage events,
 so it remains a read-only mirror until AAPS is switched over. A direct MongoDB

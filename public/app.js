@@ -1,4 +1,5 @@
 import { buildModel, docTime, glucoseSeries, gmiFromMmol, insulinPerDay, timeInRanges, trendDirection, MIN, HOUR, DAY, MGDL_PER_MMOL } from './model.js';
+import { setupTheme } from './theme.js';
 import { applyChanges, cacheAvailable, cacheRange, cachedRange, cachedValue, clearCache, cursorFor, saveCursor, saveValue, useCacheFor } from './browser-cache.js';
 
 const $ = (id) => document.getElementById(id);
@@ -945,47 +946,7 @@ function wireChart () {
   new ResizeObserver(([e]) => setW(e.contentRect.width)).observe(wrap);
 }
 
-/**
- * Day / night follows the device's light / dark setting (which phones and
- * computers can switch at sunset). The button overrides it until the device
- * switches next.
- */
-const darkQuery = matchMedia('(prefers-color-scheme: dark)');
-const systemTheme = () => (darkQuery.matches ? 'night' : 'day');
-
-function renderTheme () {
-  const night = document.documentElement.dataset.theme === 'night';
-  $('themeToggle').innerHTML = night
-    ? '<svg width="16" height="16" style="fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round" aria-hidden="true"><g transform="scale(0.6667)"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></g></svg>Day'
-    : '<svg width="16" height="16" style="fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round" aria-hidden="true"><g transform="scale(0.6667)"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></g></svg>Night';
-}
-
-function toggleTheme () {
-  const theme = document.documentElement.dataset.theme === 'night' ? 'day' : 'night';
-  document.documentElement.dataset.theme = theme;
-  if (theme === systemTheme()) {
-    try { localStorage.removeItem('loopk.theme'); } catch { /* private mode */ }
-  } else {
-    store('theme', JSON.stringify({ theme, system: systemTheme() }));
-  }
-  renderTheme();
-}
-
-/** The device's theme, or one picked by hand since the device last switched. */
-function autoTheme () {
-  let theme = systemTheme();
-  try {
-    const o = JSON.parse(localStorage.getItem('loopk.theme'));
-    if (o && o.system === theme) theme = o.theme;
-    else localStorage.removeItem('loopk.theme');
-  } catch { /* none */ }
-  document.documentElement.dataset.theme = theme;
-  renderTheme();
-}
-
 function wireOptions () {
-  $('themeToggle').addEventListener('click', toggleTheme);
-  darkQuery.addEventListener('change', autoTheme);
   $('ranges').addEventListener('change', (e) => {
     state.hours = parseInt(e.target.value, 10);
     state.hoverT = null;
@@ -1036,7 +997,7 @@ async function main () {
     location.href = '/login';
   });
 
-  autoTheme();
+  setupTheme($('themeToggle'));
   renderOptions();
   wireOptions();
   wireChart();

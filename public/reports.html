@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reports — loopk</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/vendor/gridstack-13.3.0.min.css">
+<link rel="stylesheet" href="/reports.css">
+<script>
+// Day / night as the device is set (or as picked since it last switched); set before drawing.
+(function () {
+  var theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+  try { var o = JSON.parse(localStorage.getItem('loopk.theme')); if (o && o.system === theme) theme = o.theme; } catch (e) {}
+  document.documentElement.dataset.theme = theme;
+})();
+</script>
+</head>
+<body>
+<div class="page reports-page">
+  <nav class="nav dashboard-nav">
+    <span class="nav-brand brand"><img src="/icon.svg" alt="" width="28" height="28"><span>loopk</span><span class="brand-sub">Reports</span></span>
+    <a href="/">Glucose</a>
+    <button type="button" class="btn btn-secondary" id="themeToggle"></button>
+    <a href="/admin" id="adminLink" hidden>Access</a>
+    <button class="btn btn-ghost" id="signOut" type="button">Sign out</button>
+  </nav>
+
+  <section class="report-controls" aria-label="Report period">
+    <div class="seg seg-scroll" id="period" role="radiogroup" aria-label="Period"></div>
+    <span class="report-dates" id="customDates" hidden>
+      <input class="input" type="date" id="periodFrom" aria-label="From">
+      <span>–</span>
+      <input class="input" type="date" id="periodTo" aria-label="To">
+    </span>
+    <div class="seg" id="units" role="radiogroup" aria-label="Glucose unit"></div>
+    <span class="tag" id="status" role="status">Loading…</span>
+    <span class="report-spacer"></span>
+    <button type="button" class="btn btn-secondary edit-only" id="addWidget">Add widget</button>
+    <button type="button" class="btn btn-ghost edit-only" id="resetDashboard">Reset</button>
+    <button type="button" class="btn btn-secondary" id="editDashboard" aria-pressed="false">Edit dashboard</button>
+  </section>
+
+  <div class="grid-stack" id="grid" aria-label="Report dashboard"></div>
+
+  <p class="text-muted report-note">Time in ranges counts CGM readings: very low &lt;3.0 (54), low 3.0–3.8 (54–69), in range 3.9–10.0 (70–180), high 10.1–13.9 (181–250), very high &gt;13.9 mmol/L (250 mg/dL). Insulin is what was delivered: boluses and SMBs, and basal from the profile and the temp basals. Amounts per day are averaged over all days of the period; by hour of day they are per hour.</p>
+
+  <dialog class="widget-dialog" id="widgetDialog">
+    <form method="dialog" id="widgetForm">
+      <h4 id="widgetDialogTitle">Widget</h4>
+      <div class="field"><label for="wMetric">Metric</label><select class="input" id="wMetric"></select></div>
+      <div class="field"><label for="wGroup">Group by</label><select class="input" id="wGroup"></select></div>
+      <div class="field"><label for="wDisplay">Display</label><select class="input" id="wDisplay"></select></div>
+      <div class="field"><label for="wPeriod">Period</label><select class="input" id="wPeriod"></select></div>
+      <div class="field report-dates" id="wDates" hidden>
+        <input class="input" type="date" id="wFrom" aria-label="From">
+        <span>–</span>
+        <input class="input" type="date" id="wTo" aria-label="To">
+      </div>
+      <div class="field"><label for="wTitle">Title</label><input class="input" id="wTitle" placeholder="Automatic"></div>
+      <menu class="widget-dialog-actions">
+        <button class="btn btn-ghost" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn btn-primary" value="ok" id="widgetOk">Apply</button>
+      </menu>
+    </form>
+  </dialog>
+</div>
+<script src="/vendor/gridstack-13.3.0-all.js"></script>
+<script src="/vendor/chart-4.5.1.umd.min.js"></script>
+<script type="module" src="/reports.js"></script>
+</body>
+</html>
