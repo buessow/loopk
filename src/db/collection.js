@@ -445,6 +445,32 @@ class QueryBuilder {
   }
 }
 
+// --- duplicate treatments --------------------------------------------------------
+
+/**
+ * On a document returned by CollectionStore.insert: identifiers that the
+ * write moved to removed_treatments as duplicates, possibly including the
+ * document's own (see migrations/0010_treatment_cleanup.sql).
+ */
+export const REMOVED = Symbol('removed');
+
+// Duplicates are within 60 s of each other; documents this close together
+// are checked as one stretch.
+const DUPLICATE_MS = 60000;
+const STRETCH_MS = 10 * DUPLICATE_MS;
+
+/** [from, to] stretches (ms) covering the dates, merging close ones. */
+function stretches (dates) {
+  const sorted = dates.filter(Number.isFinite).sort((a, b) => a - b);
+  const out = [];
+  for (const d of sorted) {
+    const last = out[out.length - 1];
+    if (last && d - last[1] <= STRETCH_MS) last[1] = d;
+    else out.push([d, d]);
+  }
+  return out;
+}
+
 // --- store -----------------------------------------------------------------------
 
 /** A collection table (and its child tables), read and written as APIv3 documents. */
@@ -515,7 +541,27 @@ export class CollectionStore {
     for (const t of c.tables) await insertRows(client, t, rows[t]);
   }
 
-  /** Stores a whole document: a new row, or every column of the existing one. Returns the stored document. */
+  /**
+   * Moves the treatments that duplicate others near `dates` (ms) to
+   * removed_treatments, as AAPS's re-syncs upload doses again under new
+   * identifiers. Returns the identifiers moved.
+   */
+  async removeDuplicates (client, dates) {
+    if (this.table !== 'treatments') return [];
+    const removed = [];
+    for (const [from, to] of stretches(dates)) {
+      const { rows } = await client.query('SELECT remove_duplicate_treatments($1, $2) AS identifier',
+        [new Date(from - DUPLICATE_MS), new Date(to + DUPLICATE_MS)]);
+      removed.push(...rows.map((r) => r.identifier));
+    }
+    return removed;
+  }
+
+  /**
+   * Stores a whole document: a new row, or every column of the existing one.
+   * Returns the stored document; a new treatment may be moved away as a
+   * duplicate (see REMOVED).
+   */
   async write (client, doc, { insert }) {
     const { values, extra, children: childPart } = splitDocument(this.table, doc);
     const row = { ...values, extra: json(extra) };
@@ -529,15 +575,19 @@ export class CollectionStore {
       if (!rowCount) throw new Error(`No ${this.table} document ${doc.identifier}`);
     }
     await this.writeChildren(client, [{ identifier: doc.identifier, children: childPart }]);
-    return this.findOne(doc.identifier, client);
+    const removed = insert ? await this.removeDuplicates(client, [doc.date]) : [];
+    const stored = removed.includes(doc.identifier) ? { ...doc } : await this.findOne(doc.identifier, client);
+    if (removed.length) stored[REMOVED] = removed;
+    return stored;
   }
 
   /**
    * Inserts or replaces many documents (by identifier) in one transaction,
    * keeping their srvCreated/srvModified: for importing and following.
+   * Returns the identifiers of treatments moved away as duplicates.
    */
   bulkUpsert (docs) {
-    if (!docs.length) return Promise.resolve();
+    if (!docs.length) return Promise.resolve([]);
     // One row per identifier: a statement cannot upsert the same row twice.
     const latest = [...new Map(docs.map((d) => [d.identifier, d])).values()];
     const parts = latest.map((doc) => {
@@ -548,6 +598,7 @@ export class CollectionStore {
     return this.transaction(async (client) => {
       await insertRows(client, this.table, parts.map((p) => p.row), { columns: this.columns, suffix: `ON CONFLICT (identifier) DO UPDATE SET ${updates}` });
       await this.writeChildren(client, parts);
+      return this.removeDuplicates(client, latest.map((d) => d.date));
     });
   }
 

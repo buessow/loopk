@@ -186,8 +186,13 @@ export class Follower {
         byTarget.get(p.collection).push(p.doc);
       }
       for (const [target, list] of byTarget) {
-        await this.stores[target].bulkUpsert(list);
-        for (const doc of list) this.ctx.bus.emit('storage-socket-update', { colName: target, doc });
+        const removed = new Set(await this.stores[target].bulkUpsert(list));
+        for (const doc of list) {
+          if (!removed.has(doc.identifier)) this.ctx.bus.emit('storage-socket-update', { colName: target, doc });
+        }
+        for (const identifier of removed) {
+          if (!list.some((d) => d.identifier === identifier)) this.ctx.bus.emit('storage-socket-delete', { colName: target, identifier });
+        }
         this.ctx.bus.emit('data-received', { colName: target });
         this.status.copied += list.length;
       }

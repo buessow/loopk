@@ -209,6 +209,13 @@ export const SCHEMAS = {
 };
 
 /** Profile fields stored in profile_stores / treatment_profiles. */
+// Columns the database fills itself (triggers in migrations/), not part of
+// the documents: treatments.delivered_insulin is the insulin a treatment
+// delivered, also for temp basals and extended boluses.
+export const DERIVED_COLUMNS = {
+  treatments: { delivered_insulin: 'double precision' },
+};
+
 export const PROFILE_FIELDS = [
   ['dia', 'dia', 'double'],
   ['units', 'units', 'text'],

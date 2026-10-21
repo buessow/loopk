@@ -36,6 +36,11 @@ It implements the parts of the Nightscout API that AAPS's NSClient V3 uses:
 
 Each collection is a table with typed columns for the fields AAPS uses (`migrations/0001_init.sql`; the mapping from document fields to columns is in `src/db/schema.js`). Nested structures have child tables: a profile's named stores and their schedules, the profile embedded in profile switches (`profileJson`), and the loop's predicted glucose curves. `jsonb` is used only for parts without a fixed structure (pump driver and AAPS plugin settings, the bolus wizard result) and for an `extra` column that keeps fields this schema doesn't know, so documents round-trip unchanged.
 
+Treatments get two clean-ups that API clients don't see (`migrations/0010_treatment_cleanup.sql`):
+
+- **Duplicates** — the same bolus or carbs uploaded again under another identifier, as AAPS's pump-history re-syncs do — are moved to `removed_treatments` as they are stored (by any write path), with the identifier of the treatment they duplicate. The uploader is answered as if the copy had been stored. Rerun the cleanup by hand with `SELECT count(*) FROM remove_duplicate_treatments('-infinity', 'infinity')`.
+- **`delivered_insulin`** holds the units each treatment delivered: boluses and SMBs, temp basals for the time they actually ran, extended boluses once. Triggers keep it up to date. It isn't in the documents, because Nightscout clients would count any `insulin` as a bolus.
+
 ## Setup
 
 ```sh

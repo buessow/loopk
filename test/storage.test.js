@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer } from './helpers.js';
-import { SCHEMAS } from '../src/db/schema.js';
+import { DERIVED_COLUMNS, SCHEMAS } from '../src/db/schema.js';
 import { CollectionStore, docToColumns } from '../src/db/collection.js';
 
 let s;
@@ -23,6 +23,7 @@ test('schema.js matches the tables', async () => {
     const actual = Object.fromEntries(rows.map((r) => [r.column_name, r.data_type]));
     const expected = Object.fromEntries(fields.map(([, col, type]) => [col, PG_TYPES[type]]));
     expected.extra = 'jsonb';
+    Object.assign(expected, DERIVED_COLUMNS[table]);
     assert.deepEqual(actual, expected, table);
   }
 });

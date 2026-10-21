@@ -81,7 +81,10 @@ percentage points, between training runs.
   within a minute is dropped (real SMBs are at least 3 minutes apart). This
   brings 2019–2020 insulin from about 58 to 40 U/day, in line with later
   years. Accuracy at 15 and 30 minutes barely changed (within 0.3 mg/dL);
-  the 1–4 h model and the what-if physics have not been rerun yet.
+  the 1–4 h model and the what-if physics have not been rerun yet. Since
+  migration 0010, the database itself moves such copies to
+  `removed_treatments` (22,854 boluses and carbs), and `delivered_insulin`
+  gives the units of every treatment, temp basals included.
 - **SMBs** are marked as type SMB or `is_smb`, except from late 2023 to
   early 2025, when they came only as synced "Correction Bolus" records.
 - **Grid:** everything is put on a 5-minute grid. Basal delivery is

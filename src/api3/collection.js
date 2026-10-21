@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { CollectionStore, BadFilterError } from '../db/collection.js';
+import { CollectionStore, BadFilterError, REMOVED } from '../db/collection.js';
 import {
   HTTP, MSG, ResponseSent, sendJSON, sendStatus, parseDate, floorSeconds, resolveIdentifier,
   validateUpdate, validateCommon, projector, render, isNumberInString, API3_MAX_LIMIT,
@@ -224,7 +224,13 @@ export class Collection {
     res.setHeader('Location', path.posix.join(req.baseUrl, req.path, stored.identifier));
     sendJSON(res, { status: HTTP.CREATED, fields: { identifier: stored.identifier, lastModified: now } });
 
-    this.emit('storage-socket-create', { doc: stored });
+    // A duplicate treatment is answered as stored, so that the uploader
+    // doesn't retry, but kept in removed_treatments.
+    const removed = stored[REMOVED] || [];
+    if (!removed.includes(stored.identifier)) this.emit('storage-socket-create', { doc: stored });
+    for (const identifier of removed) {
+      if (identifier !== stored.identifier) this.emit('storage-socket-delete', { identifier });
+    }
   }
 
   async replace (req, res, doc, storedDoc, { isDeduplication = false } = {}) {

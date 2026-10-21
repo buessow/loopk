@@ -5,7 +5,7 @@ import { createApp, createContext, checkSchema } from '../src/app.js';
 import { attachSockets } from '../src/sockets.js';
 
 const DATA_TABLES = [
-  'entries', 'treatments', 'treatment_profiles', 'treatment_profile_schedules',
+  'entries', 'treatments', 'removed_treatments', 'treatment_profiles', 'treatment_profile_schedules',
   'devicestatus', 'devicestatus_predictions', 'profile', 'profile_stores', 'profile_store_schedules',
   'food', 'settings', 'heartrate', 'subjects', 'users', 'follow_state', 'follow_config', 'prediction_models', 'glucose_predictions',
 ];
