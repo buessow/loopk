@@ -1,5 +1,6 @@
 import express from 'express';
 import { hourlyTotals, validTimeZone } from './index.js';
+import { profileUsage } from './profiles.js';
 
 const READ = 'This needs a token or account that may read glucose entries and treatments.';
 // Far above a real dashboard (a few KB); only guards the jsonb column.
@@ -8,6 +9,7 @@ const MAX_DASHBOARD_BYTES = 256 * 1024;
 /**
  * GET /api/reports/hours?from=&to=&tz=: hourly totals (index.js) for that
  * time range (ms; default the last 30 days) in time zone tz (default UTC).
+ * GET /api/reports/profiles?from=&to=&tz=: basal profiles in use (profiles.js), same parameters.
  * GET /api/reports/dashboard: the signed-in person's dashboard, 204 if none.
  * PUT /api/reports/dashboard: replaces it with the request body (JSON object).
  */
@@ -24,15 +26,30 @@ export function createReportRoutes (ctx) {
   };
   const read = [auth.require('api:entries:read', READ), auth.require('api:treatments:read', READ)];
 
-  router.get('/hours', read, h(async (req, res) => {
+  // { from, to, timeZone } of the query, or null after answering 400.
+  const range = (req, res) => {
     const to = req.query.to ? Number(req.query.to) : Date.now();
     const from = req.query.from ? Number(req.query.from) : to - 30 * 24 * 3600000;
     const timeZone = req.query.tz ? String(req.query.tz) : 'UTC';
     if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) {
-      return res.status(400).json({ status: 400, message: 'from and to must be times in ms, from before to' });
+      res.status(400).json({ status: 400, message: 'from and to must be times in ms, from before to' });
+      return null;
     }
-    if (!validTimeZone(timeZone)) return res.status(400).json({ status: 400, message: `Unknown time zone ${timeZone}` });
-    res.json(await hourlyTotals(pool, { from, to, timeZone }));
+    if (!validTimeZone(timeZone)) {
+      res.status(400).json({ status: 400, message: `Unknown time zone ${timeZone}` });
+      return null;
+    }
+    return { from, to, timeZone };
+  };
+
+  router.get('/hours', read, h(async (req, res) => {
+    const q = range(req, res);
+    if (q) res.json(await hourlyTotals(pool, q));
+  }));
+
+  router.get('/profiles', read, h(async (req, res) => {
+    const q = range(req, res);
+    if (q) res.json(await profileUsage(pool, q));
   }));
 
   // Dashboards belong to people signed in to the web UI, not to access tokens.

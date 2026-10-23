@@ -37,7 +37,7 @@ function toSchedule (raw) {
 const PCT_SUFFIX = /\s*\(\d+%\)$/;
 
 /**
- * Basal schedule in effect over time: [{ start (minute), schedule, pct, shift }].
+ * Basal schedule in effect over time: [{ start (minute), name, schedule, pct, shift }].
  * A schedule is a sorted list of [seconds from midnight, U/h]. A switch
  * without an embedded schedule uses the newest stored profile of that name;
  * a temporary switch (duration > 0) reverts to the previous permanent one.
@@ -56,7 +56,7 @@ export function profileEvents (switches, stores) {
     const first = st[0];
     const def = st.find((s) => s.date === first.date && s.name === first.defaultProfile);
     const schedule = toSchedule(def ? def.schedule : first.schedule);
-    if (schedule) current = { start: -Infinity, schedule, pct: 100, shift: 0 };
+    if (schedule) current = { start: -Infinity, name: def ? def.name : first.name, schedule, pct: 100, shift: 0 };
   }
   const events = current ? [current] : [];
   let permanent = current;
@@ -66,7 +66,8 @@ export function profileEvents (switches, stores) {
     const raw = sw.schedule != null ? sw.schedule : stored(sw.profile, m);
     const schedule = raw != null ? toSchedule(raw) : current?.schedule;
     if (!schedule) return;
-    current = { start: m, schedule, pct: Number(sw.percentage ?? 100), shift: Math.trunc(Number(sw.timeshift ?? 0)) };
+    const name = sw.profile != null ? sw.profile.replace(PCT_SUFFIX, '') : current?.name;
+    current = { start: m, name, schedule, pct: Number(sw.percentage ?? 100), shift: Math.trunc(Number(sw.timeshift ?? 0)) };
     events.push(current);
     const duration = Number(sw.duration) || 0;
     if (duration > 0 && permanent) {

@@ -71,7 +71,7 @@ export function createApp (ctx, { requestLog = false } = {}) {
   app.use(createSessionRoutes(ctx));
 
   const pub = path.join(root, 'public');
-  app.get(['/login', '/admin', '/reports'], (req, res) => res.sendFile(path.join(pub, `${req.path.slice(1)}.html`)));
+  app.get(['/login', '/admin', '/reports', '/profiles'], (req, res) => res.sendFile(path.join(pub, `${req.path.slice(1)}.html`)));
   app.use(express.static(pub, { index: 'index.html', extensions: ['html'] }));
 
   // eslint-disable-next-line no-unused-vars

@@ -8,6 +8,7 @@
   --chart-basal: var(--color-accent-400);
   --chart-bolus: var(--color-accent-700);
   --chart-line: var(--color-accent);
+  --chart-ratio: var(--color-accent-2-600);
 }
 
 .report-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
@@ -67,4 +68,28 @@
 /* GridStack's placeholder while moving or resizing a widget. */
 .grid-stack .grid-stack-placeholder > .placeholder-content {
   border: 1px dashed var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+/* The profiles page (profiles.html): a table of profiles that expand into a chart. */
+.profiles-table-wrap { overflow-x: auto; }
+.profiles-table { font-size: 13px; }
+.profiles-table td:not(:first-child), .profiles-table th:not(:first-child) { text-align: right; white-space: nowrap; }
+.profiles-table tbody.profile { border-top: 1px solid var(--color-divider); }
+.profile-toggle {
+  display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2);
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.profile-caret { display: inline-block; transition: transform 0.15s; color: var(--color-accent); }
+.profile.open .profile-caret { transform: rotate(90deg); }
+.profile-when { font-size: 11px; color: var(--color-neutral-600); }
+.profile-pct td { color: var(--color-neutral-700); }
+.profile-pct td:first-child { padding-left: calc(var(--space-4) + var(--space-3)); }
+.profile-detail td { padding-top: var(--space-2); }
+.profile-detail .seg { margin-bottom: var(--space-2); }
+.profile-series { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin-bottom: var(--space-2); font-size: 12px; }
+.profile-series label { display: inline-flex; align-items: center; gap: var(--space-1); cursor: pointer; }
+.profile-chart { position: relative; height: 300px; }
+.profile-chart.profile-ratio { height: 200px; }
+.profile-chart-title {
+  margin: var(--space-3) 0 var(--space-1); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-700);
 }

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Profiles — loopk</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/reports.css">
+<script>
+// Day / night as the device is set (or as picked since it last switched); set before drawing.
+(function () {
+  var theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+  try { var o = JSON.parse(localStorage.getItem('loopk.theme')); if (o && o.system === theme) theme = o.theme; } catch (e) {}
+  document.documentElement.dataset.theme = theme;
+})();
+</script>
+</head>
+<body>
+<div class="page profiles-page">
+  <nav class="nav dashboard-nav">
+    <span class="nav-brand brand"><img src="/icon.svg" alt="" width="28" height="28"><span>loopk</span><span class="brand-sub">Profiles</span></span>
+    <a href="/">Glucose</a>
+    <a href="/reports">Reports</a>
+    <button type="button" class="btn btn-secondary" id="themeToggle"></button>
+    <a href="/admin" id="adminLink" hidden>Access</a>
+    <button class="btn btn-ghost" id="signOut" type="button">Sign out</button>
+  </nav>
+
+  <section class="report-controls" aria-label="Period">
+    <div class="seg seg-scroll" id="period" role="radiogroup" aria-label="Period"></div>
+    <span class="report-dates" id="customDates" hidden>
+      <input class="input" type="date" id="periodFrom" aria-label="From">
+      <span>–</span>
+      <input class="input" type="date" id="periodTo" aria-label="To">
+    </span>
+    <span class="tag" id="status" role="status">Loading…</span>
+  </section>
+
+  <p class="text-muted report-note">One row per basal profile (name and schedule; an edited schedule is a new row), with one indented row per manual percentage set by a profile switch. <b>Active</b>: hours it was in effect in the period, and their share of the period (%). <b>Insulin</b>, <b>Basal</b>, <b>SMB/bolus</b>: units delivered meanwhile; basal comes from the profile and the loop's temp basals. <b>Per day</b>: insulin per 24 h in effect. <b>Sensitivity ratio</b>: the loop's mean ratio (autosens or dynamic ISF) while in effect. Above 1 means less sensitive: the loop multiplies the profile basal by it (without dynamic ISF it also divides the ISF by it).<b>Full days</b>, <b>Day mean</b>, <b>Day SD</b>: local days wholly under that profile and percentage, their mean total insulin (U) and its standard deviation. Click a profile to see its basal by hour of day.</p>
+
+  <div class="profiles-table-wrap">
+    <table class="table profiles-table" id="profiles">
+      <thead>
+        <tr>
+          <th>Profile</th>
+          <th>Active (h)</th>
+          <th>Share (%)</th>
+          <th>Insulin (U)</th>
+          <th>Basal (U)</th>
+          <th>SMB/bolus (U)</th>
+          <th>Per day (U)</th>
+          <th>Sensitivity ratio</th>
+          <th>Full days</th>
+          <th>Day mean (U)</th>
+          <th>Day SD (U)</th>
+        </tr>
+      </thead>
+    </table>
+  </div>
+
+  <p class="text-muted report-note">The first chart of a profile shows its basal rate (U/h) by hour of day at 100% (solid) and at the percentages used (dashed). Delivered basal and SMBs/boluses are means (U/h) with a band of ± one standard deviation, over the local clock hours wholly under the profile and the selected percentage; a band is missing where there is only one such hour. The second chart shows the loop's sensitivity ratio the same way (mean of each hour with a ratio known for at least half of it); 1 is no change. Each line, and the second chart, can be switched off with its checkbox or by clicking the line in the legend.</p>
+</div>
+<script src="/vendor/chart-4.5.1.umd.min.js"></script>
+<script type="module" src="/profiles.js"></script>
+</body>
+</html>
