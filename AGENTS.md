@@ -81,6 +81,19 @@ mobile interactions`. Keep commits scoped. Pull requests should explain the
 user-visible behavior, note migrations or configuration changes, list tests
 run, and include screenshots for changes under `public/` that affect the UI.
 
+There is a single developer: commit on `main` and do not create branches
+unless asked to.
+
+## Deployment
+
+`./deploy.sh` deploys `main`: it runs `npm test`, pushes to `origin main` and
+`origin production`, waits for the "Build and deploy" workflow and checks the
+server. Run from another branch, it offers to merge that branch into `main`
+first. The deploy applies pending migrations on production (after a backup)
+before the new container starts, so no manual `./setup-databases.sh` is
+needed there; locally, run `./setup-databases.sh --target=local` after adding
+a migration.
+
 ## Security & Configuration
 
 Never commit `.env`, database URLs, access tokens, OAuth credentials, or
