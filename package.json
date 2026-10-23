@@ -18,6 +18,7 @@
     "migrate:mongo": "node --env-file-if-exists=.env scripts/mongo-migrate.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0",
     "cookie-parser": "^1.4.7",
     "express": "^4.22.3",
     "google-auth-library": "^11.3.1",

@@ -24,5 +24,8 @@ export function loadConfig (env = process.env) {
     // Follow another Nightscout server (its URL and a read access token there),
     // unless an admin has set one on the Access page.
     follow: env.FOLLOW_URL ? { url: env.FOLLOW_URL, token: env.FOLLOW_TOKEN || '' } : null,
+    // Claude reviews of the loop (Glucose page, "Ask Claude"): the key while
+    // none is saved on the Access page, and the model.
+    anthropic: { apiKey: env.ANTHROPIC_API_KEY || '', model: env.ANALYSIS_MODEL || undefined },
   };
 }

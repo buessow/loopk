@@ -76,7 +76,10 @@
         <span><svg width="10" height="10"><circle cx="5" cy="5" r="4" style="fill:var(--color-bg);stroke:var(--color-text);stroke-width:1.5"></circle></svg>Carbs</span>
         <span><svg width="16" height="10"><path d="M0 7 L5 3 L10 6 L16 2" style="fill:none;stroke:var(--color-neutral-700);stroke-width:1.5"></path></svg>Heart rate</span>
       </div>
-      <div class="seg seg-scroll" id="ranges" role="radiogroup" aria-label="Time range"></div>
+      <div class="chart-tools">
+        <div class="seg seg-scroll" id="ranges" role="radiogroup" aria-label="Time range"></div>
+        <button type="button" class="btn btn-secondary" id="askClaude" aria-pressed="false" title="Select a period on the chart and have Claude review what the loop did" hidden>Ask Claude</button>
+      </div>
     </div>
     <div class="blueprint chart-frame"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
       <div id="chartWrap" class="chart-wrap"></div>
@@ -88,6 +91,28 @@
       <label class="check"><input type="checkbox" id="showForecast">Predictions</label>
       <label class="check"><input type="checkbox" id="showProfile" checked>Basal profile</label>
     </div>
+  </section>
+
+  <section class="analysis blueprint" id="analysis" aria-label="Review by Claude" hidden><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div class="analysis-head">
+      <h4>Did the loop get it right?</h4>
+      <span class="tag tag-accent" id="analysisRange">No period selected</span>
+      <button type="button" class="btn btn-ghost" id="analysisClose">Close</button>
+    </div>
+    <p class="analysis-hint">Drag across the chart to select up to 12 hours (with a mouse, shift-drag selects at any time). Claude gets the readings, treatments and loop runs from 6 hours before to 3 hours after the selection, the profile, and a guide to how AAPS doses, and judges whether the loop over- or under-corrected, and why.</p>
+    <label class="analysis-note">Anything Claude should know (optional)
+      <textarea class="input" id="analysisNote" rows="2" maxlength="2000" placeholder="For example: pizza at 19:00, carbs not logged; cycled 18:00–19:00"></textarea>
+    </label>
+    <div class="analysis-actions">
+      <button type="button" class="btn btn-primary" id="analysisRun" disabled>Review with Claude</button>
+      <span class="analysis-status" id="analysisStatus" role="status"></span>
+    </div>
+    <ol class="analysis-marks" id="analysisMarks" aria-label="Marks on the chart"></ol>
+    <div class="analysis-result" id="analysisResult" aria-live="polite"></div>
+    <form class="analysis-follow" id="analysisFollow" hidden>
+      <textarea class="input" id="analysisAsk" rows="2" maxlength="2000" aria-label="Follow-up question" placeholder="Ask a follow-up, e.g. why was there no SMB at (2)? Enter sends."></textarea>
+      <button type="submit" class="btn btn-primary" id="analysisAskButton">Ask</button>
+    </form>
   </section>
 
   <section class="notes">

@@ -1,5 +1,7 @@
 import { buildModel, docTime, glucoseSeries, gmiFromMmol, insulinPerDay, timeInRanges, trendDirection, MIN, HOUR, DAY, MGDL_PER_MMOL } from './model.js';
 import { setupTheme } from './theme.js';
+import { renderMarkdown } from './markdown.js';
+import { extractAnnotations } from './annotations.js';
 import { applyChanges, cacheAvailable, cacheRange, cachedRange, cachedValue, clearCache, cursorFor, saveCursor, saveValue, useCacheFor } from './browser-cache.js';
 
 const $ = (id) => document.getElementById(id);
@@ -25,6 +27,10 @@ const TREATMENT_FIELDS = 'identifier,date,created_at,srvModified,eventType,type,
   + 'duration,durationInMilliseconds,absolute,rate,percent,profile,profileJson,percentage,timeshift';
 const DEVICESTATUS_FIELDS = 'identifier,date,srvModified,openaps,loop';
 
+// The longest period Claude reviews (src/analysis/context.js, MAX_WINDOW).
+const MAX_SELECTION = 12 * HOUR;
+const MIN_SELECTION = 10 * MIN;
+
 // Target range 3.9–10 mmol/L (70–180 mg/dL), as in the design.
 const LO = 3.9;
 const HI = 10;
@@ -48,6 +54,10 @@ const state = {
   W: 1200,
   hoverT: null,
   drag: null,
+  selecting: false, // "Ask Claude" is on: a drag selects instead of panning
+  selection: null, // { from, to } (ms) for Claude to review
+  selDrag: null,
+  annotations: [], // Claude's marks on the chart: [{ n, from, to, kind, text }]
 };
 
 function stored (key, valid, fallback, parse = (v) => v) {
@@ -386,6 +396,24 @@ function pan (ms) {
   clampOffset();
   state.hoverT = null;
   scheduleRender();
+  ensureLoaded().catch(console.error);
+}
+
+/**
+ * Shows [from, to] with some room around it: the shortest range that holds
+ * it, centred on it. The range picked here is not remembered as a preference.
+ */
+function zoomTo (from, to) {
+  const needed = (to - from) * 1.2 + 30 * MIN;
+  const hours = RANGES.find((h) => h * HOUR >= needed) ?? RANGES[RANGES.length - 1];
+  if (hours !== state.hours) {
+    state.hours = hours;
+    renderSeg('ranges', RANGES, state.hours, rangeLabel);
+  }
+  state.offset = state.anchor - ((from + to) / 2 + span() / 2);
+  clampOffset();
+  state.hoverT = null;
+  render();
   ensureLoaded().catch(console.error);
 }
 
@@ -792,11 +820,58 @@ function renderChart () {
     push(`<text x="0" y="0" transform="translate(${W - 10} ${y}) rotate(90)" style="text-anchor:middle;font-family:var(--font-body);font-size:10px;letter-spacing:0.08em;fill:var(--color-accent-700)">${esc(s)}</text>`);
   }
 
+  push('<g id="ann"></g>');
+  push('<g id="sel"></g>');
   push('<g id="hov"></g>');
   push(`<rect class="hit${state.drag ? ' dragging' : ''}" id="hit" x="${padL}" y="0" width="${iw}" height="${H}"></rect>`);
 
   $('chartWrap').innerHTML = `<svg width="${W}" height="${H}" role="img" aria-label="Glucose, basal, events and heart rate">${out.join('')}</svg>`;
+  renderSelection();
+  renderAnnotations();
   renderHover();
+}
+
+// Claude's marks: blue where it found too much insulin (heading low), red too little.
+const MARK_COLOR = { over: 'var(--bg-low)', under: 'var(--bg-high)', ok: 'var(--bg-ok)', note: 'var(--color-neutral-700)' };
+const MARK_LABEL = { over: 'Too much', under: 'Too little', ok: 'Good', note: 'Note' };
+
+/** Claude's marks: a dashed line and a numbered badge at each time, a band over each period. */
+function renderAnnotations () {
+  const g = $('ann');
+  if (!g) return;
+  const { X, Ln, axis, padL, plotR, t0, t1 } = geometry();
+  let lastX = -Infinity;
+  let row = 0;
+  g.innerHTML = state.annotations.filter((a) => a.to >= t0 && a.from <= t1).map((a) => {
+    const c = MARK_COLOR[a.kind];
+    const x0 = Math.max(padL, X(a.from));
+    const x1 = Math.min(plotR, X(a.to));
+    // Badges close together stack downwards.
+    row = x0 - lastX < 22 ? row + 1 : 0;
+    lastX = x0;
+    const y = Ln.gT + 14 + row * 22;
+    return (x1 > x0 ? `<rect x="${f1(x0)}" y="${Ln.gT}" width="${f1(x1 - x0)}" height="${Ln.gH}" style="fill:color-mix(in srgb,${c} 12%,transparent)"></rect>` : '')
+      + `<line x1="${f1(x0)}" x2="${f1(x0)}" y1="${Ln.bT}" y2="${axis}" style="stroke:${c};stroke-width:1.25;stroke-dasharray:4 3"></line>`
+      + `<circle cx="${f1(x0)}" cy="${y}" r="9" style="fill:${c};stroke:var(--color-bg);stroke-width:1.5"></circle>`
+      + `<text x="${f1(x0)}" y="${y + 4}" style="fill:var(--color-bg);font-family:var(--font-body);font-size:11px;font-weight:600;text-anchor:middle">${a.n}</text>`;
+  }).join('');
+}
+
+/** The period selected for Claude: a shaded band with an edge at each end in view. */
+function renderSelection () {
+  const g = $('sel');
+  if (!g) return;
+  const s = state.selection;
+  const { X, Ln, axis, padL, plotR } = geometry();
+  const x0 = s && Math.max(padL, X(s.from));
+  const x1 = s && Math.min(plotR, X(s.to));
+  if (!s || x1 <= x0) {
+    g.innerHTML = '';
+    return;
+  }
+  const edge = (x) => (x >= padL && x <= plotR ? `<line x1="${f1(x)}" x2="${f1(x)}" y1="${Ln.bT}" y2="${axis}" style="stroke:var(--color-accent);stroke-width:1.5"></line>` : '');
+  g.innerHTML = `<rect x="${f1(x0)}" y="${Ln.bT}" width="${f1(x1 - x0)}" height="${axis - Ln.bT}" style="fill:color-mix(in srgb,var(--color-accent) 14%,transparent)"></rect>`
+    + edge(X(s.from)) + edge(X(s.to));
 }
 
 function nearest (points, t, maxGap) {
@@ -823,14 +898,15 @@ function renderHover () {
   const predicted = state.showForecast
     ? FORECAST_LINES.map(([m]) => [m, nearest((D.forecast[m] || []).filter((q) => Math.abs(q.t - t) <= 5 * MIN), t, 5 * MIN)])
     : [];
-  // Wider with the prediction rows, so their labels fit on one line.
-  const boxW = predicted.length ? 216 : 180;
+  const marks = state.annotations.filter((a) => t >= a.from - 5 * MIN * k && t <= a.to + 5 * MIN * k);
+  // Wider with the prediction rows or Claude's marks, so their labels fit.
+  const boxW = marks.length ? 260 : predicted.length ? 216 : 180;
   const left = Math.round(x > W - boxW - 40 ? x - boxW - 14 : x + 14);
   const time = state.hours > 24 || state.offset > 0 ? dayHm(t) : hm(t);
   g.innerHTML = `<line x1="${f1(x)}" x2="${f1(x)}" y1="${Ln.bT}" y2="${axis}" style="stroke:var(--color-text);stroke-width:1"></line>`
     + (p ? `<circle cx="${f1(x)}" cy="${f1(GY(p.v))}" r="5" style="fill:none;stroke:var(--color-text);stroke-width:1.5"></circle>` : '')
     + (h ? `<circle cx="${f1(x)}" cy="${f1(HY(h.v))}" r="4" style="fill:none;stroke:var(--color-text);stroke-width:1.5"></circle>` : '')
-    + `<foreignObject x="${left}" y="${Ln.gT}" width="${boxW + 16}" height="${140 + 20 * predicted.length}" style="pointer-events:none"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${boxW}px;margin:4px;background:var(--color-bg);border:1px solid var(--color-text);box-shadow:var(--shadow-md);padding:var(--space-2) var(--space-3);display:grid;grid-template-columns:1fr auto;gap:2px var(--space-3);font-size:12px">`
+    + `<foreignObject x="${left}" y="${Ln.gT}" width="${boxW + 16}" height="${140 + 20 * predicted.length + 40 * marks.length}" style="pointer-events:none"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${boxW}px;margin:4px;background:var(--color-bg);border:1px solid var(--color-text);box-shadow:var(--shadow-md);padding:var(--space-2) var(--space-3);display:grid;grid-template-columns:1fr auto;gap:2px var(--space-3);font-size:12px">`
     + `<div style="grid-column:span 2;font-family:var(--font-heading);font-weight:600;font-size:15px">${time}</div>`
     + `<span style="color:var(--color-neutral-700)">Glucose</span><span>${p ? fmt(p.v) + ' ' + unit() : '–'}</span>`
     + predicted.map(([m, q]) => `<span style="color:var(--color-neutral-700)">Predicted ${m} min ago</span><span>${q ? fmt(q.v) : '–'}</span>`).join('')
@@ -838,6 +914,7 @@ function renderHover () {
     + (state.showProfile ? `<span style="color:var(--color-neutral-700)">Profile</span><span>${sg ? sg.prof.toFixed(2) + ' U/h' : '–'}</span>` : '')
     + `<span style="color:var(--color-neutral-700)">COB</span><span>${cob ? Math.round(cob.v) + ' g' : '–'}</span>`
     + `<span style="color:var(--color-neutral-700)">Heart rate</span><span>${h ? h.v + ' bpm' : '–'}</span>`
+    + marks.map((a) => `<span style="grid-column:span 2;border-top:1px solid var(--color-divider);padding-top:2px"><b style="color:${MARK_COLOR[a.kind]}">(${a.n}) ${MARK_LABEL[a.kind]}</b> ${esc(a.text)}</span>`).join('')
     + '</div></foreignObject>';
 }
 
@@ -864,6 +941,179 @@ function render () {
   renderChart();
 }
 
+// --- review by Claude ---------------------------------------------------
+
+let reviewing = null; // AbortController of the review being streamed
+
+/** "Thu 22 · 14:05 – 17:30 · 3 h 25 min" */
+function selectionLabel ({ from, to }) {
+  const m = Math.round((to - from) / MIN);
+  const length = m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
+  const sameDay = new Date(from).toDateString() === new Date(to).toDateString();
+  return `${dayHm(from)} – ${sameDay ? hm(to) : dayHm(to)} · ${length}`;
+}
+
+function showAnalysis () {
+  const panel = $('analysis');
+  if (!panel.hidden) return;
+  panel.hidden = false;
+  panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function updateAnalysis () {
+  const s = state.selection;
+  $('analysisRange').textContent = s ? selectionLabel(s) : 'No period selected';
+  $('analysisRun').disabled = !s && !reviewing;
+  $('analysisRun').textContent = reviewing ? 'Stop' : review.conversation.length ? 'New review' : 'Review with Claude';
+  $('analysisAskButton').disabled = !!reviewing;
+  $('askClaude').setAttribute('aria-pressed', String(state.selecting));
+  $('chartWrap').classList.toggle('selecting', state.selecting);
+}
+
+// The review being discussed: the first request ({ from, to, tz, question })
+// and the answers and follow-up questions since ([{ role, text }]).
+const review = { request: null, conversation: [] };
+
+/** The answers and questions so far; the annotations blocks are on the chart instead. */
+function renderThread () {
+  const near = review.request?.from ?? Date.now();
+  $('analysisResult').innerHTML = review.conversation.map((turn) => (turn.role === 'user'
+    ? `<div class="analysis-question">${esc(turn.text)}</div>`
+    : `<div class="analysis-answer">${renderMarkdown(extractAnnotations(turn.text, near).markdown)}</div>`)).join('');
+  $('analysisFollow').hidden = !review.conversation.some((turn) => turn.role === 'assistant');
+}
+
+/**
+ * Asks Claude: the first review of the selection (no question) or a
+ * follow-up question about it. Streams the answer into the thread; while
+ * it runs, "Review with Claude" stops it.
+ */
+async function askClaude (question = null) {
+  if (reviewing) return;
+  if (question == null) {
+    const s = state.selection;
+    if (!s) return;
+    review.request = { from: Math.round(s.from), to: Math.round(s.to), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, question: $('analysisNote').value };
+    review.conversation = [];
+    setAnnotations([]);
+  } else {
+    review.conversation.push({ role: 'user', text: question });
+  }
+  const sent = review.conversation.length ? [...review.conversation] : undefined;
+  const answer = { role: 'assistant', text: '' };
+  review.conversation.push(answer);
+  const ctl = new AbortController();
+  reviewing = ctl;
+  const status = (text) => { $('analysisStatus').textContent = text; };
+  status(question == null ? 'Claude is reading the records… a review takes a minute or two.' : 'Claude is thinking…');
+  renderThread();
+  updateAnalysis();
+  try {
+    const res = await fetch('/api/analysis', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...review.request, conversation: sent }),
+      signal: ctl.signal,
+    });
+    if (res.status === 401) {
+      location.href = '/login';
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || body.description || `error ${res.status}`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      answer.text += decoder.decode(value, { stream: true });
+      // A follow-up only replaces the marks when it lists them again.
+      const { annotations } = extractAnnotations(answer.text, review.request.from);
+      if (annotations.length && annotations.length !== state.annotations.length) {
+        setAnnotations(annotations);
+        // Show the reviewed period and everything Claude marked.
+        zoomTo(Math.min(review.request.from, ...annotations.map((a) => a.from)), Math.max(review.request.to, ...annotations.map((a) => a.to)));
+      }
+      renderThread();
+      status('Claude is writing…');
+    }
+    status(`About ${selectionLabel(review.request)}. Claude can be wrong: check it against the chart.`);
+  } catch (err) {
+    status(ctl.signal.aborted ? 'Stopped.' : `No answer: ${err.message}`);
+  } finally {
+    // Without an answer, the question goes back into the box to ask again.
+    if (!answer.text.trim()) {
+      review.conversation.pop();
+      if (question != null) {
+        review.conversation.pop();
+        if (!$('analysisAsk').value) $('analysisAsk').value = question;
+      }
+    }
+    reviewing = null;
+    renderThread();
+    updateAnalysis();
+  }
+}
+
+/** Shows Claude's marks on the chart and lists them in the panel. */
+function setAnnotations (annotations) {
+  state.annotations = annotations;
+  renderAnnotations();
+  $('analysisMarks').innerHTML = annotations.map((a) => `<li><button type="button" class="analysis-mark" data-mark="${a.n}">`
+    + `<span class="analysis-mark-n" style="background:${MARK_COLOR[a.kind]}">${a.n}</span>`
+    + `<span class="analysis-mark-time">${hm(a.from)}${a.to > a.from ? '–' + hm(a.to) : ''}</span>`
+    + `<b style="color:${MARK_COLOR[a.kind]}">${MARK_LABEL[a.kind]}</b> <span>${esc(a.text)}</span></button></li>`).join('');
+}
+
+function wireAnalysis () {
+  // A mark in the list zooms the chart to it.
+  $('analysisMarks').addEventListener('click', (e) => {
+    const a = state.annotations.find((x) => String(x.n) === e.target.closest('[data-mark]')?.dataset.mark);
+    if (!a) return;
+    // The mark with an hour either side.
+    zoomTo(a.from - HOUR, a.to + HOUR);
+    $('chartWrap').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  });
+  $('askClaude').addEventListener('click', () => {
+    state.selecting = !state.selecting;
+    if (state.selecting) showAnalysis();
+    updateAnalysis();
+  });
+  $('analysisClose').addEventListener('click', () => {
+    reviewing?.abort();
+    state.selecting = false;
+    state.selection = null;
+    review.request = null;
+    review.conversation = [];
+    renderThread();
+    setAnnotations([]);
+    $('analysis').hidden = true;
+    renderSelection();
+    updateAnalysis();
+  });
+  $('analysisRun').addEventListener('click', () => (reviewing ? reviewing.abort() : askClaude()));
+  // Follow-up questions; Enter sends, shift + Enter starts a new line.
+  const follow = () => {
+    const q = $('analysisAsk').value.trim();
+    if (!q || reviewing) return;
+    $('analysisAsk').value = '';
+    askClaude(q);
+  };
+  $('analysisFollow').addEventListener('submit', (e) => {
+    e.preventDefault();
+    follow();
+  });
+  $('analysisAsk').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      follow();
+    }
+  });
+}
+
 // --- wiring --------------------------------------------------------------
 
 function wireChart () {
@@ -880,10 +1130,28 @@ function wireChart () {
   wrap.addEventListener('pointerdown', (e) => {
     if (!isHit(e) || e.button !== 0) return;
     e.preventDefault();
+    // "Ask Claude" on, or shift held: the drag selects a period.
+    if (state.selecting || e.shiftKey) {
+      const t = Math.min(Date.now(), timeAt(e));
+      state.selDrag = { id: e.pointerId, t };
+      state.selection = { from: t, to: t };
+      wrap.setPointerCapture(e.pointerId);
+      renderSelection();
+      return;
+    }
     state.drag = { x: e.clientX, offset: state.offset, id: e.pointerId, moved: false };
     wrap.setPointerCapture(e.pointerId);
   });
   wrap.addEventListener('pointermove', (e) => {
+    if (state.selDrag && e.pointerId === state.selDrag.id) {
+      const a = state.selDrag.t;
+      // At most MAX_SELECTION from where the drag started, and not in the future.
+      const b = Math.min(Date.now(), Math.max(a - MAX_SELECTION, Math.min(a + MAX_SELECTION, timeAt(e))));
+      state.selection = { from: Math.min(a, b), to: Math.max(a, b) };
+      renderSelection();
+      updateAnalysis();
+      return;
+    }
     if (state.drag && e.pointerId === state.drag.id) {
       const dx = e.clientX - state.drag.x;
       if (Math.abs(dx) >= 6) state.drag.moved = true;
@@ -901,6 +1169,15 @@ function wireChart () {
     renderHover();
   });
   const endDrag = (e) => {
+    if (state.selDrag && e.pointerId === state.selDrag.id) {
+      state.selDrag = null;
+      const s = state.selection;
+      if (s && s.to - s.from < MIN_SELECTION) state.selection = null;
+      renderSelection();
+      if (state.selection) showAnalysis();
+      updateAnalysis();
+      return;
+    }
     if (!state.drag || e.pointerId !== state.drag.id) return;
     state.drag = null;
     // Touch taps do not open a persistent value popover; values are available
@@ -991,6 +1268,8 @@ async function main () {
   const session = await res.json();
   await useCacheFor(session.user.email).catch(() => {});
   $('adminLink').hidden = !session.isAdmin;
+  // Reviews need an Anthropic API key (Access page).
+  $('askClaude').hidden = !session.claude;
   $('signOut').addEventListener('click', async () => {
     await clearCache().catch(() => {});
     await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
@@ -1001,6 +1280,7 @@ async function main () {
   renderOptions();
   wireOptions();
   wireChart();
+  wireAnalysis();
 
   try {
     const [first] = await Promise.all([
