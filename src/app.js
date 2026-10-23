@@ -14,6 +14,8 @@ import { PredictionRecorder } from './predict/recorder.js';
 import { createReportRoutes } from './reports/routes.js';
 import { createAnalysisRoutes } from './analysis/routes.js';
 import { ClaudeReviewer } from './analysis/claude.js';
+import { SportMode } from './sport/mode.js';
+import { createSportRoutes } from './sport/routes.js';
 import { Following } from './sync/following.js';
 import { logRequests } from './monitoring/requests.js';
 
@@ -35,6 +37,9 @@ export async function createContext (config, pool) {
   // Reviews of the loop by Claude, with the key an admin set (or ANTHROPIC_API_KEY).
   ctx.reviewer = new ClaudeReviewer(pool, config.anthropic);
   await ctx.reviewer.load();
+  // Sport mode: a profile percentage and temp target sent to AAPS.
+  ctx.sport = new SportMode(ctx);
+  await ctx.sport.load();
   return ctx;
 }
 
@@ -73,6 +78,7 @@ export function createApp (ctx, { requestLog = false } = {}) {
   app.use('/api/prediction', createPredictionRoutes(ctx));
   app.use('/api/reports', createReportRoutes(ctx));
   app.use('/api/analysis', createAnalysisRoutes(ctx));
+  app.use(createSportRoutes(ctx));
   app.use('/api', (req, res, next) => (req.path.startsWith('/session') || req.path.startsWith('/admin') ? next() : res.status(404).json({ status: 404, message: 'Not found' })));
   app.use(createSessionRoutes(ctx));
 

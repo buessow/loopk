@@ -65,6 +65,19 @@
       <button class="btn btn-ghost" type="button" id="claudeRemove" hidden>Remove</button>
     </form>
   </section>
+  <section style="display:flex;flex-direction:column;gap:var(--space-3)" id="sportSection">
+    <h3 style="margin:0">Sport mode</h3>
+    <p class="text-muted" style="margin:0">Adds a Sport button to the glucose page. Switching it on writes a Profile Switch to a percentage of the profile and an Activity temp target; switching it off goes back to the profile from before and ends the temp target. The duration is chosen when switching it on; with no limit it stays on until it is switched off (AAPS has no temp target without an end, so the temp target is then sent for 24 hours). AAPS applies them only with “Receive profile switches” and “Receive temporary targets” on in its NSClient settings: check on the phone that they arrived. A percentage below 100 lowers basal and makes ISF and carb ratio weaker by the same factor, so carbs are still counted right. Only admins can switch it.</p>
+    <div id="sportStatus"></div>
+    <form class="row" id="sportForm">
+      <div class="field"><label for="sportPct">Profile percentage</label><input class="input" id="sportPct" type="number" min="10" max="200" step="1" required value="70"></div>
+      <div class="field"><label for="sportTarget">Temp target</label><input class="input" id="sportTarget" type="number" step="any" placeholder="none"></div>
+      <div class="field"><label for="sportUnits">Unit</label><select class="input" id="sportUnits"><option>mmol/L</option><option>mg/dL</option></select></div>
+      <div class="field"><label for="sportProfile">Profile</label><select class="input" id="sportProfile"></select></div>
+      <button class="btn btn-primary" type="submit" id="sportSave">Save</button>
+      <button class="btn btn-ghost" type="button" id="sportRemove" hidden>Remove</button>
+    </form>
+  </section>
   <p class="error" id="error" hidden></p>
 </div>
 <script type="module" src="/admin.js"></script>

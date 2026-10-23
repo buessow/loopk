@@ -158,6 +158,25 @@
 .check { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; }
 .check input { accent-color: var(--color-accent); width: 16px; height: 16px; margin: 0; }
 .legend [hidden] { display: none; }
+/* Sport mode: a button by the update time, its window below it. */
+#sport[aria-pressed=true] { background: var(--color-accent); color: var(--color-bg); border-color: var(--color-accent); }
+.sport-wrap { position: relative; display: inline-flex; }
+.sport-pop {
+  position: absolute; top: calc(100% + var(--space-2)); right: 0; z-index: 20;
+  width: min(340px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: var(--space-3);
+  padding: var(--space-4); background: var(--color-bg); border: 1px solid var(--color-divider);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-text) 14%, transparent); font-size: 14px;
+}
+.sport-pop[hidden] { display: none; }
+.sport-head { display: flex; align-items: center; gap: var(--space-2); }
+.sport-head h4 { margin: 0; flex: 1 1 auto; }
+.sport-text { margin: 0; font-size: 13px; color: var(--color-neutral-700); text-wrap: pretty; }
+.sport-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.sport-duration { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 13px; }
+.sport-duration[hidden] { display: none; }
+.sport-status { font-size: 13px; color: var(--color-neutral-700); }
+.sport-status:empty { display: none; }
+
 @media (max-width: 900px) {
   .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .stat-hr, .stats > :nth-last-child(2) { grid-column: span 2; }

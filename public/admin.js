@@ -252,13 +252,70 @@ $('claudeRemove').addEventListener('click', async () => {
   } catch (err) { showError(err); }
 });
 
+// --- sport mode ---------------------------------------------------------------
+
+const MGDL_PER_MMOL = 18.0182;
+let sport = null;
+
+function renderSport () {
+  const c = sport.config;
+  const mmol = $('sportUnits').value === 'mmol/L';
+  const target = (v) => (mmol ? `${(v / MGDL_PER_MMOL).toFixed(1)} mmol/L` : `${Math.round(v)} mg/dL`);
+  $('sportStatus').innerHTML = c
+    ? `<span class="tag tag-accent">On</span> Sport switches to ${c.profile ? esc(c.profile) : 'the profile in use'} at ${c.percentage}%${c.target != null ? `, temp target ${target(c.target)}` : ', no temp target'}.`
+      + (c.updatedBy ? `<br><span class="text-muted">Set by ${esc(c.updatedBy)} ${since(c.updatedAt)}.</span>` : '')
+    : '<span class="tag tag-neutral">Off</span> Not set up: the glucose page has no Sport button.';
+  $('sportProfile').innerHTML = ['<option value="">Profile in use</option>', ...sport.profiles.map((n) => `<option>${esc(n)}</option>`)].join('');
+  if (c) {
+    $('sportPct').value = c.percentage;
+    $('sportTarget').value = c.target == null ? '' : mmol ? (c.target / MGDL_PER_MMOL).toFixed(1) : Math.round(c.target);
+    $('sportProfile').value = c.profile || '';
+  }
+  $('sportRemove').hidden = !c;
+}
+
+async function loadSport () {
+  sport = await call('GET', '/api/admin/sport');
+  $('sportUnits').value = /^mg/i.test(sport.units || '') ? 'mg/dL' : 'mmol/L';
+  if (!sport.config) $('sportTarget').value = $('sportUnits').value === 'mmol/L' ? '7.8' : '140';
+  renderSport();
+}
+
+$('sportUnits').addEventListener('change', () => {
+  const v = Number($('sportTarget').value);
+  if ($('sportTarget').value && v) $('sportTarget').value = $('sportUnits').value === 'mmol/L' ? (v / MGDL_PER_MMOL).toFixed(1) : Math.round(v * MGDL_PER_MMOL);
+});
+
+$('sportForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('error').hidden = true;
+  const raw = $('sportTarget').value.trim();
+  const target = raw ? Number(raw) * ($('sportUnits').value === 'mmol/L' ? MGDL_PER_MMOL : 1) : null;
+  try {
+    sport = await call('PUT', '/api/admin/sport', {
+      percentage: Number($('sportPct').value),
+      target: target == null ? null : Math.round(target * 10) / 10,
+      profile: $('sportProfile').value || null,
+    });
+    renderSport();
+  } catch (err) { showError(err); }
+});
+
+$('sportRemove').addEventListener('click', async () => {
+  if (!confirm('Remove sport mode? The Sport button disappears from the glucose page; a running sport mode stays on until it ends.')) return;
+  try {
+    sport = await call('DELETE', '/api/admin/sport');
+    renderSport();
+  } catch (err) { showError(err); }
+});
+
 async function main () {
   const session = await call('GET', '/api/session');
   if (!session.isAdmin) {
     document.querySelectorAll('section').forEach((s) => { s.hidden = true; });
     throw new Error('Only admins can manage access.');
   }
-  await Promise.all([loadTokens(), loadUsers(), loadFollow(), loadClaude()]);
+  await Promise.all([loadTokens(), loadUsers(), loadFollow(), loadClaude(), loadSport()]);
 }
 
 main().catch(showError);

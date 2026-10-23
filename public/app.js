@@ -1259,6 +1259,97 @@ function wireOptions () {
   $('toNow').addEventListener('click', () => pan(-state.offset));
 }
 
+// --- sport mode: a profile percentage and temp target sent to AAPS ---------
+
+// 0: until ended.
+const SPORT_DURATIONS = [0, 30, 45, 60, 90, 120, 180, 240];
+let sport = null; // GET /api/sport
+let sportTimer = null;
+
+function renderSport () {
+  const s = sport;
+  const on = s.active;
+  const c = s.config;
+  const target = (mgdl) => `${fmt(mgdl / MGDL_PER_MMOL)} ${unit()}`;
+  $('sportWrap').hidden = !s.configured && !on;
+  $('sport').setAttribute('aria-pressed', String(on));
+  const until = s.until ? `until ${hm(s.until)}` : 'until ended';
+  $('sport').textContent = on ? `Sport · ${s.until ? until : 'on'}` : 'Sport';
+  $('sportTag').textContent = on ? `On ${until}` : 'Off';
+  $('sportTag').className = on ? 'tag tag-accent' : 'tag';
+  $('sportText').textContent = on
+    ? `AAPS was sent ${s.profile} at ${s.percentage}%${s.target != null ? ` and an Activity temp target of ${target(s.target)}` : ''} ${s.until ? until : 'until you end it'}. Check on the phone that it took them over. Ending goes back to the profile from before.`
+    : c
+      ? `Switches AAPS to ${c.profile || 'the profile in use'} at ${c.percentage}%${c.target != null ? ` with an Activity temp target of ${target(c.target)}` : ''}, and back when it ends. AAPS applies it when it receives it from this server: check on the phone.`
+      : 'Sport mode is not set up: an admin can set it up on the Access page.';
+  if (c) {
+    const options = SPORT_DURATIONS;
+    // No limit unless another duration was picked.
+    const chosen = Number($('sportDuration').value) || 0;
+    const label = (m) => (!m ? 'No limit' : m < 60 || m % 60 ? m + ' min' : m / 60 + ' h');
+    $('sportDuration').innerHTML = options.map((m) => `<option value="${m}"${m === chosen ? ' selected' : ''}>${label(m)}</option>`).join('');
+  }
+  $('sportDurationField').hidden = on || !c;
+  $('sportSwitch').textContent = on ? 'End now' : 'Start';
+  $('sportSwitch').disabled = !s.canSwitch || (!on && !c);
+  if (!s.canSwitch) $('sportStatus').textContent = s.following ? `This server follows ${s.following}: switch sport mode there.` : 'Only admins can switch sport mode.';
+  // Show it ended when it ends.
+  clearTimeout(sportTimer);
+  if (on && s.until) sportTimer = setTimeout(() => loadSport().catch(console.error), Math.max(0, s.until - Date.now()) + 5000);
+}
+
+async function loadSport () {
+  sport = await api('/api/sport');
+  renderSport();
+}
+
+function wireSport () {
+  const pop = $('sportPop');
+  const show = (open) => {
+    pop.hidden = !open;
+    $('sport').setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    // Below the button, kept inside the screen.
+    pop.style.right = '0';
+    const left = pop.getBoundingClientRect().left;
+    if (left < 16) pop.style.right = `${left - 16}px`;
+    $('sportStatus').textContent = '';
+    loadSport().catch(console.error);
+  };
+  $('sport').addEventListener('click', () => show(pop.hidden));
+  $('sportClose').addEventListener('click', () => show(false));
+  document.addEventListener('click', (e) => { if (!pop.hidden && !$('sportWrap').contains(e.target)) show(false); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !pop.hidden) {
+      show(false);
+      $('sport').focus();
+    }
+  });
+  $('sportSwitch').addEventListener('click', async () => {
+    const on = sport.active;
+    const button = $('sportSwitch');
+    button.disabled = true;
+    $('sportStatus').textContent = on ? 'Ending…' : 'Sending to AAPS…';
+    try {
+      const res = await fetch(`/api/sport/${on ? 'stop' : 'start'}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ utcOffset: -new Date().getTimezoneOffset(), ...(on ? {} : { duration: Number($('sportDuration').value) }) }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.message || `${res.status}`);
+      sport = { ...sport, ...body };
+      $('sportStatus').textContent = on ? 'Ended: AAPS was sent the profile from before.' : 'Sent: AAPS applies it when it receives it.';
+      renderSport();
+      loadRecent().catch(console.error);
+    } catch (err) {
+      $('sportStatus').textContent = err.message;
+      button.disabled = false;
+    }
+  });
+}
+
 async function main () {
   const res = await fetch('/api/session', { credentials: 'same-origin' });
   if (res.status === 401) {
@@ -1270,6 +1361,8 @@ async function main () {
   $('adminLink').hidden = !session.isAdmin;
   // Reviews need an Anthropic API key (Access page).
   $('askClaude').hidden = !session.claude;
+  // Sport mode, once an admin set it up (Access page).
+  if (session.sport) loadSport().catch(console.error);
   $('signOut').addEventListener('click', async () => {
     await clearCache().catch(() => {});
     await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
@@ -1281,6 +1374,7 @@ async function main () {
   wireOptions();
   wireChart();
   wireAnalysis();
+  wireSport();
 
   try {
     const [first] = await Promise.all([

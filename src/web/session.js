@@ -72,6 +72,8 @@ export function createSessionRoutes (ctx) {
       follow: ctx.follower ? ctx.follower.status : null,
       // Whether "Ask Claude" works: an Anthropic API key is set.
       claude: !!ctx.reviewer?.available,
+      // Whether the Sport button shows: an admin set sport mode up.
+      sport: !!ctx.sport?.configured,
       permissions: a.permissions,
     });
   }));

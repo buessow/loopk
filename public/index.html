@@ -21,6 +21,24 @@
   <nav class="nav dashboard-nav">
     <span class="nav-brand brand"><img src="/icon.svg" alt="" width="28" height="28"><span>loopk</span><span class="brand-sub">LoopKeeper</span></span>
     <span class="tag tag-accent" id="syncText">Loading…</span>
+    <span class="sport-wrap" id="sportWrap" hidden>
+      <button type="button" class="btn btn-secondary" id="sport" aria-pressed="false" aria-expanded="false" aria-controls="sportPop" title="Switch AAPS to the sport profile percentage and temp target">Sport</button>
+      <div class="sport-pop" id="sportPop" role="dialog" aria-label="Sport mode" hidden>
+        <div class="sport-head">
+          <h4>Sport mode</h4>
+          <span class="tag" id="sportTag">Off</span>
+          <button type="button" class="btn btn-ghost" id="sportClose" aria-label="Close">Close</button>
+        </div>
+        <p class="sport-text" id="sportText"></p>
+        <div class="sport-actions">
+          <label class="sport-duration" id="sportDurationField">For
+            <select class="input" id="sportDuration"></select>
+          </label>
+          <button type="button" class="btn btn-primary" id="sportSwitch">Start</button>
+        </div>
+        <span class="sport-status" id="sportStatus" role="status"></span>
+      </div>
+    </span>
     <a href="/reports">Reports</a>
     <a href="/profiles">Profiles</a>
     <button type="button" class="btn btn-secondary" id="themeToggle"></button>
