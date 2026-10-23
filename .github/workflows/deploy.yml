@@ -6,6 +6,11 @@ on:
     branches: [production]
   workflow_dispatch: {}
 
+# One deploy at a time: two at once would apply the same migrations twice.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
