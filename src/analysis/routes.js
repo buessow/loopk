@@ -1,7 +1,7 @@
 import express from 'express';
 import { validTimeZone } from '../reports/index.js';
 import { loopContext, MAX_WINDOW } from './context.js';
-import { SYSTEM, userMessage } from './prompt.js';
+import { SYSTEM, UNITS, userMessage } from './prompt.js';
 import { apiErrorMessage } from './claude.js';
 
 const READ = 'This needs an account that may read glucose entries, treatments and device status.';
@@ -33,7 +33,7 @@ export function followUps (conversation) {
 }
 
 /**
- * POST /api/analysis { from, to, tz, question?, conversation? }: Claude's
+ * POST /api/analysis { from, to, tz, units?, question?, conversation? }: Claude's
  * review of what the loop did from `from` to `to` (ms), streamed as Markdown
  * text; with a conversation ([{ role: 'assistant', text }, { role: 'user',
  * text }, ...] after the first request), its answer to the last question.
@@ -57,10 +57,11 @@ export function createAnalysisRoutes (ctx) {
       const reviewer = ctx.reviewer;
       if (!reviewer?.available) return fail(res, 503, 'Reviews need an Anthropic API key: an admin can add one on the Access page');
 
-      const { from, to, tz = 'UTC', question = '', conversation } = req.body || {};
+      const { from, to, tz = 'UTC', units = 'mmol/L', question = '', conversation } = req.body || {};
       if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return fail(res, 400, 'from and to must be times in ms, from before to');
       if (to - from > MAX_WINDOW) return fail(res, 400, `Select at most ${MAX_WINDOW / 3600000} hours`);
       if (typeof tz !== 'string' || !validTimeZone(tz)) return fail(res, 400, `Unknown time zone ${tz}`);
+      if (!UNITS.includes(units)) return fail(res, 400, `units must be ${UNITS.join(' or ')}`);
       if (typeof question !== 'string' || question.length > MAX_QUESTION) return fail(res, 400, `The note must be text of at most ${MAX_QUESTION} characters`);
 
       const later = followUps(conversation);
@@ -77,7 +78,7 @@ export function createAnalysisRoutes (ctx) {
         const result = await reviewer.review({
           system: SYSTEM,
           // The records again, as in the first request, so they come from the cache.
-          messages: [{ role: 'user', content: userMessage(records, { question }) }, ...later.messages],
+          messages: [{ role: 'user', content: userMessage(records, { question, units }) }, ...later.messages],
           onText: (text) => res.write(text),
           signal: abort.signal,
         });

@@ -993,7 +993,7 @@ async function askClaude (question = null) {
   if (question == null) {
     const s = state.selection;
     if (!s) return;
-    review.request = { from: Math.round(s.from), to: Math.round(s.to), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, question: $('analysisNote').value };
+    review.request = { from: Math.round(s.from), to: Math.round(s.to), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, units: unit(), question: $('analysisNote').value };
     review.conversation = [];
     setAnnotations([]);
   } else {

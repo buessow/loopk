@@ -100,8 +100,14 @@ export function uniqueRuns (runs) {
 
 const positive = (v) => (v != null && v >= 0 ? v : null);
 
-/** The user message: what to judge, then the records as tables. */
-export function userMessage (c, { question = '' } = {}) {
+/** Glucose units the person may read the review in. */
+export const UNITS = ['mmol/L', 'mg/dL'];
+
+/**
+ * The user message: what to judge, then the records as tables. `units` is
+ * the glucose unit the person reads the page in: the answer uses it too.
+ */
+export function userMessage (c, { question = '', units = 'mmol/L' } = {}) {
   const at = timeFormatter(c.timeZone);
   const inWindow = (t) => t >= c.from && t < c.to;
   const mark = (t) => (inWindow(t) ? '*' : '');
@@ -113,18 +119,21 @@ Judge each important decision by what the loop knew at the time (its reason line
 
 Answer in Markdown, in this order:
 1. **Verdict**: one line, one of "About right", "Over-corrected", "Under-corrected" or "Mixed", with the main reason.
-2. **What happened**: the key moments as a short list with times (glucose, IOB, COB, what the loop did).
-3. **Why**: the mechanisms behind the decisions, referring to the guide.
-4. **What to change**: concrete settings to look at, only where the records support it, each with how sure you are. Say so if nothing should change.
-5. Last, the moments to mark on the person's glucose chart, as a fenced code block with the info string \`annotations\` holding a JSON array of 2 to 8 objects, in time order:
+2. **In plain words**: 3 to 6 sentences for someone who uses the loop but knows little about how its algorithm works: what glucose did, what the loop did about it and why, and whether that was good. Use everyday words; avoid abbreviations such as IOB, COB, ISF, SMB, UAM or eventual BG, or explain each in a few words the first time (for example "insulin still working in the body"). Make it understandable without the sections below.
+3. **What happened**: the key moments as a short list with times (glucose, IOB, COB, what the loop did).
+4. **Why**: the mechanisms behind the decisions, referring to the guide.
+5. **What to change**: concrete settings to look at, only where the records support it, each with how sure you are. Say so if nothing should change.
+6. Last, the moments to mark on the person's glucose chart, as a fenced code block with the info string \`annotations\` holding a JSON array of 2 to 8 objects, in time order:
 \`\`\`annotations
 [{"at": "Thu 22 Oct 18:40", "until": "Thu 22 Oct 19:30", "kind": "under", "text": "UAM late: SMBs capped at 0.6 U"}]
 \`\`\`
 "at" (and optional "until", for a period) are times written exactly as in the tables; "kind" is "over" (too much insulin), "under" (too little or too late), "ok" (a good decision) or "note" (context, such as unlogged carbs); "text" says what happened in at most 60 characters. Refer to them in the text by their number in this list, as (1), (2) and so on. Write nothing after the block.
 
-The person may ask follow-up questions. Answer them from the same records and the guide, briefly and to the point, referring to the marks by number. Only if a follow-up answer points at moments not marked yet, end it with a new annotations block that lists the earlier marks first, unchanged and in the same order, then the new ones.
+The person may ask follow-up questions. Answer them from the same records and the guide, briefly and to the point, in the same plain language where the question allows, referring to the marks by number. Only if a follow-up answer points at moments not marked yet, end it with a new annotations block that lists the earlier marks first, unchanged and in the same order, then the new ones.
 
-Keep the text under about 600 words. Glucose in the tables is in mg/dL and mmol/L; the loop's reason lines and the profile use ${c.profile?.units || 'the profile\'s'} units.`);
+The person reads glucose in ${units}. Write every glucose value, target, glucose change and ISF in your answers and marks in ${units} (ISF as ${units} per U), also where the records use the other unit: the tables give glucose in both, but the loop's reason lines and the profile use ${c.profile?.units || 'the profile\'s'} units, and the loop-run columns are in mg/dL (1 mmol/L = 18 mg/dL). Insulin is in units (U), carbs in grams.
+
+Keep the text under about 700 words.`);
   if (question.trim()) out.push(`The person adds: ${question.trim()}`);
 
   out.push(`## Records

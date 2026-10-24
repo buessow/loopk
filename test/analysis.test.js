@@ -61,7 +61,7 @@ after(() => s.close());
 const ask = (body) => request(s.app).post('/api/analysis').set('Cookie', cookie).send(body);
 
 test('a review streams Claude\'s answer about the selected period', async () => {
-  const res = await ask({ from: t0, to: t0 + HOUR, tz: 'UTC', question: 'Pizza at noon' }).expect(200);
+  const res = await ask({ from: t0, to: t0 + HOUR, tz: 'UTC', units: 'mg/dL', question: 'Pizza at noon' }).expect(200);
   assert.match(res.headers['content-type'], /^text\/markdown/);
   assert.equal(res.text, '**Verdict**: About right – the loop held off.');
 
@@ -69,6 +69,9 @@ test('a review streams Claude\'s answer about the selected period', async () => 
   assert.match(system, /How AAPS doses/);
   assert.match(user, /The person selected Sun 1 Feb 12:00 – Sun 1 Feb 13:00 \(UTC\)/);
   assert.match(user, /The person adds: Pizza at noon/);
+  // The answer uses the page's glucose unit and starts with a plain explanation.
+  assert.match(user, /The person reads glucose in mg\/dL\. Write every glucose value, target, glucose change and ISF in your answers and marks in mg\/dL/);
+  assert.match(user, /2\. \*\*In plain words\*\*: 3 to 6 sentences/);
   // Readings from 6 h before (here from 11:00) to 3 h after, the window marked.
   assert.match(user, /\n \| Sun 1 Feb 11:00 \| 138 \| 7\.7 \|/);
   assert.match(user, /\n\* \| Sun 1 Feb 12:00 \| 150 \| 8\.3 \|/);
@@ -99,6 +102,7 @@ test('a review checks the period and that it has readings', async () => {
   await ask({ from: t0 + HOUR, to: t0 }).expect(400);
   await ask({ from: t0, to: t0 + 13 * HOUR }).expect(400);
   await ask({ from: t0, to: t0 + HOUR, tz: 'Nowhere/Else' }).expect(400);
+  await ask({ from: t0, to: t0 + HOUR, units: 'mg' }).expect(400);
   await ask({ from: t0, to: t0 + HOUR, question: 'x'.repeat(2001) }).expect(400);
   const res = await ask({ from: t0 - 48 * HOUR, to: t0 - 47 * HOUR }).expect(422);
   assert.match(res.body.message, /no glucose readings/);
@@ -197,7 +201,7 @@ test('a follow-up question sends the conversation after the records', async () =
     { role: 'assistant', text: '**Verdict**: About right (1).' },
     { role: 'user', text: 'Why no SMB at 12:30?' },
   ];
-  const res = await ask({ from: t0, to: t0 + HOUR, tz: 'UTC', question: 'Pizza at noon', conversation }).expect(200);
+  const res = await ask({ from: t0, to: t0 + HOUR, tz: 'UTC', units: 'mg/dL', question: 'Pizza at noon', conversation }).expect(200);
   assert.equal(res.text, '**Verdict**: About right – the loop held off.');
   const { messages } = calls.at(-1);
   assert.deepEqual(messages.map((m) => m.role), ['user', 'assistant', 'user']);
