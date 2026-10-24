@@ -97,7 +97,6 @@
       </div>
       <div class="chart-tools">
         <div class="seg seg-scroll" id="ranges" role="radiogroup" aria-label="Time range"></div>
-        <button type="button" class="btn btn-secondary" id="askClaude" aria-pressed="false" title="Select a period on the chart and have Claude review what the loop did" hidden>Ask Claude</button>
       </div>
     </div>
     <div class="blueprint chart-frame"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
@@ -113,13 +112,29 @@
     </div>
   </section>
 
-  <section class="analysis blueprint" id="analysis" aria-label="Review by Claude" hidden><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-    <div class="analysis-head">
-      <h4>Did the loop get it right?</h4>
-      <span class="tag tag-accent" id="analysisRange">No period selected</span>
-      <button type="button" class="btn btn-ghost" id="analysisClose">Close</button>
+  <details class="analysis misses blueprint" id="misses"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <summary class="analysis-head">
+      <h4>Loop misses</h4>
+      <span class="tag" id="missesCount" hidden></span>
+    </summary>
+    <div class="analysis-tools">
+      <div class="seg" id="missDays" role="radiogroup" aria-label="Period"></div>
+      <div class="seg" id="missKind" role="radiogroup" aria-label="Kind"></div>
     </div>
-    <p class="analysis-hint">Drag across the chart to select up to 12 hours (with a mouse, shift-drag selects at any time). Claude gets the readings, treatments and loop runs from 6 hours before to 3 hours after the selection, the profile, and a guide to how AAPS doses, and judges whether the loop over- or under-corrected, and why.</p>
+    <p class="analysis-hint">Lows below 3.9 mmol/L (70 mg/dL) after SMBs in the hour before that the low leaves no room for, and highs above 13.9 (250) the loop dosed for far too mildly or was capped on. The amounts are estimates from the loop's ISF, for finding patterns, not exact doses. Pick one to show it on the chart.</p>
+    <span class="analysis-status" id="missesStatus" role="status"></span>
+    <ol class="misses-list" id="missesList"></ol>
+  </details>
+  <details class="analysis blueprint" id="analysis" hidden><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <summary class="analysis-head">
+      <h4>Ask Claude</h4>
+      <span class="tag tag-accent" id="analysisRange">No period selected</span>
+    </summary>
+    <div class="analysis-tools">
+      <button type="button" class="btn btn-secondary" id="analysisSelect" aria-pressed="false">Select time range</button>
+      <button type="button" class="btn btn-ghost" id="analysisClear">Clear</button>
+    </div>
+    <p class="analysis-hint">Press "Select time range", then drag across the chart to select up to 12 hours (with a mouse, shift-drag selects at any time). Claude gets the readings, treatments and loop runs from 6 hours before to 3 hours after the selection, the profile, and a guide to how AAPS doses, and judges whether the loop over- or under-corrected, and why.</p>
     <label class="analysis-note">Anything Claude should know (optional)
       <textarea class="input" id="analysisNote" rows="2" maxlength="2000" placeholder="For example: pizza at 19:00, carbs not logged; cycled 18:00–19:00"></textarea>
     </label>
@@ -133,7 +148,8 @@
       <textarea class="input" id="analysisAsk" rows="2" maxlength="2000" aria-label="Follow-up question" placeholder="Ask a follow-up, e.g. why was there no SMB at (2)? Enter sends."></textarea>
       <button type="submit" class="btn btn-primary" id="analysisAskButton">Ask</button>
     </form>
-  </section>
+  </details>
+
 
   <section class="notes">
     <div><h6>Basal lane</h6><p>The dashed step line is the basal profile: the hourly rates programmed in the pump. The filled steps are the basal actually delivered. Where the fill rises above the dashed line, the loop raised the rate with a temporary basal; where it drops below it or to zero, delivery was reduced or suspended.</p></div>

@@ -3,12 +3,16 @@ import { validTimeZone } from '../reports/index.js';
 import { loopContext, MAX_WINDOW } from './context.js';
 import { SYSTEM, UNITS, userMessage } from './prompt.js';
 import { apiErrorMessage } from './claude.js';
+import { findMisses } from './misses.js';
 
 const READ = 'This needs an account that may read glucose entries, treatments and device status.';
 const MAX_QUESTION = 2000;
 const MAX_ANSWER = 40000;
 // The first answer and up to 10 follow-up questions with their answers.
 const MAX_TURNS = 21;
+const DAY = 24 * 3600000;
+// The search for misses looks at most this far at once.
+const MAX_MISSES_WINDOW = 366 * DAY;
 
 /**
  * The conversation after the first request, as Messages API turns, or a
@@ -38,6 +42,7 @@ export function followUps (conversation) {
  * text; with a conversation ([{ role: 'assistant', text }, { role: 'user',
  * text }, ...] after the first request), its answer to the last question.
  * For people signed in to the web page only: each answer costs API credit.
+ * GET /api/analysis/misses?from=&to=: see below.
  */
 export function createAnalysisRoutes (ctx) {
   const router = express.Router();
@@ -48,6 +53,20 @@ export function createAnalysisRoutes (ctx) {
     auth.require('api:devicestatus:read', READ),
   ];
   const fail = (res, status, message) => res.status(status).json({ status, message });
+
+  // GET /api/analysis/misses?from=&to=: times the loop got it wrong (misses.js), default the last 30 days.
+  router.get('/misses', read, async (req, res, next) => {
+    try {
+      res.set('Cache-Control', 'no-store');
+      const to = req.query.to ? Number(req.query.to) : Date.now();
+      const from = req.query.from ? Number(req.query.from) : to - 30 * DAY;
+      if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return fail(res, 400, 'from and to must be times in ms, from before to');
+      if (to - from > MAX_MISSES_WINDOW) return fail(res, 400, `Search at most ${MAX_MISSES_WINDOW / DAY} days at once`);
+      res.json({ from, to, misses: await findMisses(pool, { from, to }) });
+    } catch (err) {
+      next(err);
+    }
+  });
 
   router.post('/', read, express.json({ limit: '16kb' }), async (req, res, next) => {
     try {

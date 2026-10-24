@@ -3,6 +3,7 @@ import { setupTheme } from './theme.js';
 import { renderMarkdown } from './markdown.js';
 import { extractAnnotations } from './annotations.js';
 import { CURVES, algorithmName, algorithmPeriods, curvePoints, loopRuns, splitReason } from './loopruns.js';
+import { missNote, missSelection, missSummary } from './misses.js';
 import { applyChanges, cacheAvailable, cacheRange, cachedRange, cachedValue, clearCache, cursorFor, saveCursor, saveValue, useCacheFor } from './browser-cache.js';
 
 const $ = (id) => document.getElementById(id);
@@ -31,6 +32,9 @@ const DEVICESTATUS_FIELDS = 'identifier,date,srvModified,openaps,loop';
 // The longest period Claude reviews (src/analysis/context.js, MAX_WINDOW).
 const MAX_SELECTION = 12 * HOUR;
 const MIN_SELECTION = 10 * MIN;
+// Periods the loop's misses can be listed for, in days.
+const MISS_DAYS = [7, 30, 90];
+const MISS_KINDS = { all: 'All', low: 'Lows', high: 'Highs' };
 
 // Target range 3.9–10 mmol/L (70–180 mg/dL), as in the design.
 const LO = 3.9;
@@ -56,10 +60,14 @@ const state = {
   W: 1200,
   hoverT: null,
   drag: null,
-  selecting: false, // "Ask Claude" is on: a drag selects instead of panning
+  selecting: false, // "Select time range" is on: a drag selects instead of panning
   selection: null, // { from, to } (ms) for Claude to review
   selDrag: null,
   annotations: [], // Claude's marks on the chart: [{ n, from, to, kind, text }]
+  misses: null, // the loop's misses (misses.js) in the last missDays, newest first
+  missDays: stored('missDays', (v) => MISS_DAYS.includes(+v), 30, Number),
+  missKind: 'all',
+  canReview: false, // the session may ask Claude
 };
 
 function stored (key, valid, fallback, parse = (v) => v) {
@@ -1032,6 +1040,7 @@ function render () {
   renderTitle();
   renderStats();
   renderChart();
+  renderMisses();
 }
 
 // --- review by Claude ---------------------------------------------------
@@ -1048,8 +1057,8 @@ function selectionLabel ({ from, to }) {
 
 function showAnalysis () {
   const panel = $('analysis');
-  if (!panel.hidden) return;
-  panel.hidden = false;
+  if (panel.open) return;
+  panel.open = true;
   panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
@@ -1059,7 +1068,9 @@ function updateAnalysis () {
   $('analysisRun').disabled = !s && !reviewing;
   $('analysisRun').textContent = reviewing ? 'Stop' : review.conversation.length ? 'New review' : 'Review with Claude';
   $('analysisAskButton').disabled = !!reviewing;
-  $('askClaude').setAttribute('aria-pressed', String(state.selecting));
+  $('analysisSelect').setAttribute('aria-pressed', String(state.selecting));
+  $('analysisSelect').textContent = state.selecting ? 'Drag across the chart…' : s ? 'Select another time range' : 'Select time range';
+  $('analysisClear').hidden = !s && !review.conversation.length;
   $('chartWrap').classList.toggle('selecting', state.selecting);
 }
 
@@ -1170,12 +1181,12 @@ function wireAnalysis () {
     zoomTo(a.from - HOUR, a.to + HOUR);
     $('chartWrap').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
-  $('askClaude').addEventListener('click', () => {
+  $('analysisSelect').addEventListener('click', () => {
     state.selecting = !state.selecting;
-    if (state.selecting) showAnalysis();
+    if (state.selecting) $('chartWrap').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     updateAnalysis();
   });
-  $('analysisClose').addEventListener('click', () => {
+  $('analysisClear').addEventListener('click', () => {
     reviewing?.abort();
     state.selecting = false;
     state.selection = null;
@@ -1183,10 +1194,11 @@ function wireAnalysis () {
     review.conversation = [];
     renderThread();
     setAnnotations([]);
-    $('analysis').hidden = true;
     renderSelection();
     updateAnalysis();
   });
+  rememberOpen('analysis', 'claudeOpen');
+  updateAnalysis();
   $('analysisRun').addEventListener('click', () => (reviewing ? reviewing.abort() : askClaude()));
   // Follow-up questions; Enter sends, shift + Enter starts a new line.
   const follow = () => {
@@ -1203,6 +1215,94 @@ function wireAnalysis () {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       follow();
+    }
+  });
+}
+
+/** Opens the section `id` as it was left, and remembers it under `key`. */
+function rememberOpen (id, key) {
+  const section = $(id);
+  section.open = stored(key, (v) => v === '0' || v === '1', false, (v) => v === '1');
+  section.addEventListener('toggle', () => store(key, section.open ? 1 : 0));
+}
+
+// --- loop misses ---------------------------------------------------------
+
+// Glucose (mg/dL, as the misses come) in the page's unit.
+const missGlucose = (v) => `${fmt(v / MGDL_PER_MMOL)} ${unit()}`;
+
+async function loadMisses () {
+  const to = Date.now();
+  $('missesStatus').textContent = 'Searching…';
+  state.misses = null;
+  renderMisses();
+  try {
+    const body = await api(`/api/analysis/misses?from=${to - state.missDays * DAY}&to=${to}`);
+    state.misses = body.misses;
+  } catch (err) {
+    state.misses = [];
+    $('missesStatus').textContent = `Could not search: ${err.message}`;
+    return;
+  }
+  renderMisses();
+}
+
+function renderMisses () {
+  if (!$('misses').open || !state.misses) return;
+  const list = state.misses.filter((m) => state.missKind === 'all' || m.kind === state.missKind);
+  const lows = state.misses.filter((m) => m.kind === 'low').length;
+  $('missesCount').hidden = false;
+  $('missesCount').textContent = `${state.misses.length} in ${state.missDays} days`;
+  $('missesStatus').textContent = `${lows} low${lows === 1 ? '' : 's'} after SMBs and ${state.misses.length - lows} under-dosed high${state.misses.length - lows === 1 ? '' : 's'} in the last ${state.missDays} days.`;
+  $('missesList').innerHTML = list.map((m) => `<li class="miss" data-miss="${m.start}">`
+    + `<button type="button" class="miss-show" title="Show it on the chart">`
+    + `<span class="miss-time">${esc(dayHm(m.start, true))}</span>`
+    + `<span class="tag ${m.kind === 'low' ? 'miss-low' : 'tag-warn'}">${m.kind === 'low' ? 'Low' : 'High'} ${esc(fmt(m.glucose / MGDL_PER_MMOL))}</span>`
+    + `<span class="miss-text">${esc(missSummary(m, missGlucose))}</span>`
+    + (m.flags.length ? `<span class="miss-flags">${m.flags.map((f) => `<span class="tag">${esc(f)}</span>`).join('')}</span>` : '')
+    + '</button>'
+    + (state.canReview ? '<button type="button" class="btn btn-secondary miss-ask">Ask Claude</button>' : '')
+    + '</li>').join('');
+}
+
+/** Selects the miss's period and shows it on the chart. */
+function showMiss (m) {
+  state.selection = missSelection(m);
+  zoomTo(state.selection.from, state.selection.to);
+  renderSelection();
+  updateAnalysis();
+}
+
+function wireMisses () {
+  renderSeg('missDays', MISS_DAYS, state.missDays, (d) => d + 'd');
+  renderSeg('missKind', Object.keys(MISS_KINDS), state.missKind, (k) => MISS_KINDS[k]);
+  $('misses').addEventListener('toggle', () => {
+    if (!$('misses').open) return;
+    if (!state.misses) loadMisses();
+    else renderMisses();
+  });
+  rememberOpen('misses', 'missesOpen');
+  $('missDays').addEventListener('change', (e) => {
+    state.missDays = Number(e.target.value);
+    store('missDays', state.missDays);
+    loadMisses();
+  });
+  $('missKind').addEventListener('change', (e) => {
+    state.missKind = e.target.value;
+    renderMisses();
+  });
+  $('missesList').addEventListener('click', (e) => {
+    const item = e.target.closest('[data-miss]');
+    const m = item && state.misses?.find((x) => String(x.start) === item.dataset.miss);
+    if (!m) return;
+    showMiss(m);
+    if (e.target.closest('.miss-ask')) {
+      if (reviewing) return;
+      $('analysisNote').value = missNote(m, missGlucose);
+      showAnalysis();
+      askClaude();
+    } else {
+      $('chartWrap').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   });
 }
@@ -1267,7 +1367,11 @@ function wireChart () {
       const s = state.selection;
       if (s && s.to - s.from < MIN_SELECTION) state.selection = null;
       renderSelection();
-      if (state.selection) showAnalysis();
+      // One selection per "Select time range"; shift-drag selects again.
+      if (state.selection) {
+        state.selecting = false;
+        showAnalysis();
+      }
       updateAnalysis();
       return;
     }
@@ -1345,6 +1449,12 @@ function wireOptions () {
     state.showForecast = e.target.checked;
     store('forecast', state.showForecast ? 1 : 0);
     $('legForecast').hidden = !state.showForecast;
+    render();
+  });
+  $('showLoop').addEventListener('change', (e) => {
+    state.showLoop = e.target.checked;
+    store('loop', state.showLoop ? 1 : 0);
+    $('legLoop').hidden = !state.showLoop;
     render();
   });
   $('earlier').addEventListener('click', () => pan(span() / 2));
@@ -1468,6 +1578,7 @@ async function main () {
   wireOptions();
   wireChart();
   wireAnalysis();
+  wireMisses();
   wireSport();
 
   try {
