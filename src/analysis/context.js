@@ -72,6 +72,7 @@ const HEART_RATE = `SELECT date, beats_per_minute::float8 AS bpm FROM heartrate
 // The profile of the newest switch with an embedded profile before the end,
 // else the default profile of the newest stored profile.
 const SWITCH_PROFILE = `SELECT t.date, t.profile AS name, p.dia::float8 AS dia, p.units, p.timezone,
+     t.percentage::float8 AS percentage, t.timeshift::float8 AS timeshift,
      (SELECT json_object_agg(kind, v) FROM (
         SELECT kind, json_agg(json_build_array(coalesce(seconds, extract(epoch FROM time::time)::int), value) ORDER BY position) AS v
         FROM treatment_profile_schedules s WHERE s.treatment_identifier = t.identifier GROUP BY kind) k) AS schedules
@@ -92,20 +93,29 @@ const STORE_PROFILE = `SELECT p.date, s.name, s.dia::float8 AS dia, coalesce(s.u
  * end, timeZone, readings, treatments, runs, heartRate, profile,
  * configuration }; start and end include the time before and after.
  */
+/**
+ * The profile in effect at `t` (ms): the newest profile switch with an
+ * embedded profile, else the default profile of the newest stored profile.
+ * { date, name, dia, units, timezone, percentage?, timeshift?, schedules, source } or null.
+ */
+export async function profileAt (pool, t) {
+  const [switched, stored] = await Promise.all([pool.query(SWITCH_PROFILE, [new Date(t)]), pool.query(STORE_PROFILE, [new Date(t)])]);
+  const profile = switched.rows[0] || stored.rows[0] || null;
+  return profile && { ...profile, date: ms(profile.date), source: switched.rows[0] ? 'profile switch' : 'stored profile' };
+}
+
 export async function loopContext (pool, { from, to, timeZone, now = Date.now() }) {
   const start = from - BEFORE;
   const end = Math.min(to + AFTER, now);
   const range = [new Date(start), new Date(end)];
-  const [readings, treatments, runs, heartRate, configuration, switched, stored] = await Promise.all([
+  const [readings, treatments, runs, heartRate, configuration, profile] = await Promise.all([
     pool.query(READINGS, range),
     pool.query(TREATMENTS, range),
     pool.query(RUNS, [...range, new Date(from), new Date(to)]),
     pool.query(HEART_RATE, range),
     pool.query(CONFIGURATION, [new Date(to)]),
-    pool.query(SWITCH_PROFILE, [new Date(to)]),
-    pool.query(STORE_PROFILE, [new Date(to)]),
+    profileAt(pool, to),
   ]);
-  const profile = switched.rows[0] || stored.rows[0] || null;
   return {
     from,
     to,
@@ -116,7 +126,7 @@ export async function loopContext (pool, { from, to, timeZone, now = Date.now() 
     treatments: treatments.rows.map((r) => ({ ...r, date: ms(r.date) })),
     runs: runs.rows.map((r) => ({ ...r, date: ms(r.date) })),
     heartRate: heartRate.rows.map((r) => ({ ...r, date: ms(r.date) })),
-    profile: profile && { ...profile, date: ms(profile.date), source: switched.rows[0] ? 'profile switch' : 'stored profile' },
+    profile,
     configuration: configuration.rows[0] ? { ...configuration.rows[0], date: ms(configuration.rows[0].date) } : null,
   };
 }

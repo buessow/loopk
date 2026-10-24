@@ -27,5 +27,9 @@ export function loadConfig (env = process.env) {
     // Claude reviews of the loop (Glucose page, "Ask Claude"): the key while
     // none is saved on the Access page, and the model.
     anthropic: { apiKey: env.ANTHROPIC_API_KEY || '', model: env.ANALYSIS_MODEL || undefined },
+    // The person's time zone (IANA, e.g. Europe/Zurich) for the MCP server's
+    // answers when the agent names none; else the profile's, which AAPS does
+    // not always keep current.
+    timeZone: env.TIME_ZONE || '',
   };
 }

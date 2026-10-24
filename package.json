@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.1.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "cookie-parser": "^1.4.7",
     "express": "^4.22.3",
     "google-auth-library": "^11.3.1",
@@ -26,7 +27,8 @@
     "pg": "^8.23.1",
     "socket.io": "^4.8.4",
     "socket.io-client": "^4.8.4",
-    "uuid": "^14.0.3"
+    "uuid": "^14.0.3",
+    "zod": "4.1.12"
   },
   "devDependencies": {
     "mongodb": "^6.21.0",

@@ -16,6 +16,7 @@ import { createAnalysisRoutes } from './analysis/routes.js';
 import { ClaudeReviewer } from './analysis/claude.js';
 import { SportMode } from './sport/mode.js';
 import { createSportRoutes } from './sport/routes.js';
+import { createMcpRoutes } from './mcp/server.js';
 import { Following } from './sync/following.js';
 import { logRequests } from './monitoring/requests.js';
 
@@ -79,6 +80,8 @@ export function createApp (ctx, { requestLog = false } = {}) {
   app.use('/api/reports', createReportRoutes(ctx));
   app.use('/api/analysis', createAnalysisRoutes(ctx));
   app.use(createSportRoutes(ctx));
+  // For agents: read-only tools over the data (src/mcp/server.js).
+  app.use('/mcp', createMcpRoutes(ctx));
   app.use('/api', (req, res, next) => (req.path.startsWith('/session') || req.path.startsWith('/admin') ? next() : res.status(404).json({ status: 404, message: 'Not found' })));
   app.use(createSessionRoutes(ctx));
 

@@ -7,7 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const GUIDE = fs.readFileSync(path.join(root, 'docs', 'aaps-algorithms.md'), 'utf8');
+/** How AAPS doses (docs/aaps-algorithms.md), in Markdown. */
+export const GUIDE = fs.readFileSync(path.join(root, 'docs', 'aaps-algorithms.md'), 'utf8');
 const MGDL_PER_MMOL = 18.0182;
 const HR_BUCKET = 15 * 60000;
 
