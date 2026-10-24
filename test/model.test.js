@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildModel, basalSegments, cobSeries, forecastSeries, profileTimeline, tempBasals, eventSeries, gmiFromMmol, insulinPerDay, onBoard, timeInRanges, trendDirection, DAY, HOUR, MIN } from '../public/model.js';
+import { buildModel, basalSegments, glucoseSeries, cobSeries, forecastSeries, profileTimeline, tempBasals, eventSeries, gmiFromMmol, insulinPerDay, onBoard, timeInRanges, trendDirection, DAY, HOUR, MIN } from '../public/model.js';
 
 const profile = {
   defaultProfile: 'P',
@@ -134,4 +134,14 @@ test('recorded predictions become one glucose series per lead time', () => {
   assert.deepEqual(series[15], [{ t: 500, v: 9, madeAt: 50 }, { t: 1000, v: 10, madeAt: 100 }]);
   assert.deepEqual(series[30], [{ t: 2000, v: 5, madeAt: 200 }]);
   assert.deepEqual(forecastSeries(), {});
+});
+
+test('glucose leaves out the made-up readings of AAPS\'s Random BG source', () => {
+  const t = Date.UTC(2026, 9, 18, 9);
+  const g = glucoseSeries([
+    { type: 'sgv', date: t, sgv: 106, device: 'G7 Native' },
+    { type: 'sgv', date: t + 20000, sgv: 57.4, device: 'Random' },
+    { type: 'sgv', date: t + 5 * MIN, sgv: 124 },
+  ]);
+  assert.deepEqual(g.map((p) => Math.round(p.v * 18)), [106, 124]);
 });

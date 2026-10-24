@@ -316,8 +316,13 @@ export function treatmentMinutes (model) {
   return treatments ? treatmentSlots * model.slotMinutes + RUNNING_MINUTES : 0;
 }
 
+// AAPS's "Random BG" source makes readings up, for trying AAPS out; they
+// can arrive alongside the real sensor's (public/model.js keeps the same list).
+export const SIMULATED_SOURCES = ['Random'];
+
 /** SQL condition for the entries that are glucose readings the model uses. */
-export const VALID_SGV = `type = 'sgv' AND sgv BETWEEN ${SGV_MIN} AND ${SGV_MAX} AND date IS NOT NULL AND is_valid IS DISTINCT FROM false`;
+export const VALID_SGV = `type = 'sgv' AND sgv BETWEEN ${SGV_MIN} AND ${SGV_MAX} AND date IS NOT NULL AND is_valid IS DISTINCT FROM false`
+  + ` AND coalesce(device, '') NOT IN (${SIMULATED_SOURCES.map((d) => `'${d}'`).join(', ')})`;
 
 const reading = (r) => ({
   date: new Date(r.date).getTime(),

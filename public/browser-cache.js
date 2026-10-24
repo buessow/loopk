@@ -3,8 +3,11 @@
 // only records created, changed, or soft-deleted since the last visit.
 
 const DB_NAME = 'loopk-dashboard';
-const DB_VERSION = 2;
+// 3: entries carry their device, to leave out simulated readings.
+const DB_VERSION = 3;
 const META = 'meta';
+// How long the page waits for the cache to open before going on without it.
+const OPEN_TIMEOUT = 3000;
 const COLLECTIONS = ['entries', 'treatments', 'devicestatus', 'heartrate'];
 
 let opening;
@@ -22,16 +25,30 @@ async function db () {
   if (!opening) {
     opening = new Promise((resolve, reject) => {
       const open = indexedDB.open(DB_NAME, DB_VERSION);
-      open.onupgradeneeded = () => {
+      open.onupgradeneeded = (e) => {
         const database = open.result;
+        // Documents cached before version 3 lack fields the page needs now: start over.
+        if (e.oldVersion < 3) for (const name of [...database.objectStoreNames]) database.deleteObjectStore(name);
         for (const collection of COLLECTIONS) {
           if (!database.objectStoreNames.contains(collection)) database.createObjectStore(collection, { keyPath: 'identifier' });
         }
         if (!database.objectStoreNames.contains(META)) database.createObjectStore(META, { keyPath: 'key' });
       };
-      open.onsuccess = () => resolve(open.result);
+      open.onsuccess = () => {
+        const database = open.result;
+        // A newer page (another tab) upgrading the cache: let it, and open
+        // the new version on next use.
+        database.onversionchange = () => {
+          database.close();
+          opening = null;
+        };
+        resolve(database);
+      };
       open.onerror = () => reject(open.error);
       open.onblocked = () => reject(new Error('Browser cache is blocked'));
+      // Tabs of older pages that hold the cache open can stall an upgrade
+      // without a "blocked" event: the page works without the cache meanwhile.
+      setTimeout(() => reject(new Error('Browser cache did not open')), OPEN_TIMEOUT);
     }).catch(() => {
       unavailable = true;
       return null;

@@ -156,7 +156,7 @@ async function fetchPredictions (from, to) {
 /** Entries, treatments, device status, heart rate and recorded predictions in [from, to). */
 async function fetchSeries (from, to) {
   const [entries, treatments, devicestatus, heartrate, predictions] = await Promise.all([
-    fetchRange('entries', 'date', from, to, '&type=sgv&fields=identifier,date,srvModified,sgv,direction,type'),
+    fetchRange('entries', 'date', from, to, '&type=sgv&fields=identifier,date,srvModified,sgv,direction,type,device'),
     fetchRange('treatments', 'created_at', from, to, '&fields=' + TREATMENT_FIELDS),
     fetchRange('devicestatus', 'date', from, to, '&fields=' + DEVICESTATUS_FIELDS).catch(() => []),
     fetchRange('heartrate', 'date', from, to, '&fields=identifier,date,srvModified,beatsPerMinute').catch(() => []),
@@ -238,7 +238,7 @@ async function loadRecent ({ refreshCache = true } = {}) {
     api('/api/v3/devicestatus?sort$desc=created_at&limit=3'),
     api('/api/v3/profile?sort$desc=date&limit=1'),
     fetchSwitchBefore(from),
-    api('/api/v3/entries?type=sgv&sort$desc=date&limit=1&fields=identifier,date,srvModified,sgv,direction,type'),
+    api('/api/v3/entries?type=sgv&sort$desc=date&limit=1&fields=identifier,date,srvModified,sgv,direction,type,device'),
     // Optional: the page works without it.
     api('/api/prediction').catch(() => null),
   ]);

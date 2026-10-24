@@ -59,9 +59,13 @@ export function docTime (doc) {
 }
 
 /** Glucose readings (sgv, mg/dL) as { t, v } in mmol/L, ascending. */
+// AAPS's "Random BG" source makes readings up, for trying AAPS out; they
+// can arrive alongside the real sensor's (src/predict/index.js, SIMULATED_SOURCES).
+const SIMULATED_SOURCES = ['Random'];
+
 export function glucoseSeries (entries) {
   return entries
-    .filter((e) => (e.type || 'sgv') === 'sgv' && num(e.sgv) > 0)
+    .filter((e) => (e.type || 'sgv') === 'sgv' && num(e.sgv) > 0 && !SIMULATED_SOURCES.includes(e.device))
     .map((e) => ({ t: docTime(e), v: num(e.sgv) / MGDL_PER_MMOL, direction: e.direction }))
     .filter((p) => p.t != null)
     .sort((a, b) => a.t - b.t);
