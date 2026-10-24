@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import { startServer, tokenFor } from './helpers.js';
-import { episodes, loopMisses, reasonPredictions } from '../src/analysis/misses.js';
+import { episodes, loopMisses, reasonPredictions, runLimits } from '../src/analysis/misses.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -84,6 +84,15 @@ test('reason predictions are read in mg/dL whatever units the profile has', () =
   assert.deepEqual(reasonPredictions({ target_bg: 110, reason: RESCUE_REASON }), { minPredBG: 126, minGuardBG: 90, IOBpredBG: 54, COBpredBG: 216, UAMpredBG: null });
   assert.equal(reasonPredictions({ target_bg: 100, reason: 'Target: 100, minPredBG 85, minGuardBG -12;' }).minGuardBG, -12);
   assert.equal(reasonPredictions({ reason: 'no temp required' }).minPredBG, null);
+});
+
+test('the limits a run hit are read from its reason, with the setting behind the SMB size', () => {
+  const uam = 'COB: 0, Dev: 8.1, ISF: 1.3, CR: 9.15, Target: 5.9, minPredBG 12.4, minGuardBG 11.8; Eventual BG 18.3 >= 5.9, max_iob 10.0,  insulinReq 4.954; maxBolus 0.6. Microbolusing 0.6U.';
+  assert.deepEqual(runLimits({ iob: 9.5, cob: 0, reason: uam }), [{ kind: 'uamSmbSize', value: 0.6 }, { kind: 'maxIob', value: 10 }]);
+  // 40 g on board at CR 10 need 4 U: with 3 U IOB the meal setting applies.
+  const meal = 'COB: 40, Dev: 2.0, CR: 10, Target: 5.6; Eventual BG 12.4 >= 5.6,  insulinReq 1.73; maxBolus 0.4. Microbolusing 0.4U. adj. req. rate: 4.63 to maxSafeBasal: 3.4, temp 3.05 < 3.4U/hr.';
+  assert.deepEqual(runLimits({ iob: 3, cob: 40, reason: meal }), [{ kind: 'smbSize', value: 0.4 }, { kind: 'maxBasal', value: 3.4 }]);
+  assert.deepEqual(runLimits({ reason: 'Eventual BG 7.0 >= 6.0, insulinReq 0.2. Microbolusing 0.1U.' }), []);
 });
 
 let s;

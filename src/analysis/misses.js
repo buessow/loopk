@@ -40,8 +40,16 @@ export const DEFAULTS = {
 const GAP = 20 * MIN;
 // Episodes this close to the one before are the same episode.
 const MERGE = 30 * MIN;
-// The loop wanted more than it gave: an SMB capped at maxBolus, IOB at maxIOB, SMB off.
-const LIMIT = /maxBolus|maxIOB|SMB disabled|disabling SMB/i;
+// What held the loop back, as its reason says (oref0 determine-basal):
+// "maxBolus 0.6" an SMB cut to the SMB size limit, "max_iob 10.0" the extra
+// insulin cut so IOB stays under max IOB, "maxSafeBasal: 3.4" a temp basal
+// cut to the max safe basal, "SMB disabled" no SMBs.
+const LIMITS = [
+  ['smbSize', /\bmaxBolus:?\s+(\d+(?:\.\d+)?)/],
+  ['maxIob', /\bmax_?iob:?\s+(\d+(?:\.\d+)?)/i],
+  ['maxBasal', /\bmaxSafeBasal:?\s+(\d+(?:\.\d+)?)/],
+  ['smbOff', /SMB disabled|disabling SMB/i],
+];
 
 const READINGS = `SELECT date, sgv::float8 AS sgv FROM entries
    WHERE ${VALID_SGV} AND date >= $1 AND date < $2 ORDER BY date`;
@@ -155,6 +163,44 @@ const median = (values) => {
   return s.length ? s[s.length >> 1] : null;
 };
 
+/**
+ * The limits a run hit: [{ kind, value }]. The SMB size limit is AAPS's
+ * "Max minutes of basal to limit SMB to" of the basal, or the one "for UAM"
+ * once IOB is more than the carbs on board need (kind 'uamSmbSize').
+ */
+export function runLimits (run) {
+  const text = run?.reason || '';
+  const out = [];
+  for (const [kind, pattern] of LIMITS) {
+    const m = pattern.exec(text);
+    if (!m) continue;
+    let k = kind;
+    if (kind === 'smbSize') {
+      const cr = /\bCR:?\s+(\d+(?:\.\d+)?)/.exec(text);
+      const mealInsulin = cr && Number(cr[1]) > 0 ? (run.cob || 0) / Number(cr[1]) : 0;
+      if (run.iob > 0 && run.iob > mealInsulin) k = 'uamSmbSize';
+    }
+    out.push({ kind: k, value: m[1] != null ? Number(m[1]) : null });
+  }
+  return out;
+}
+
+/** The limits of `runs` together: [{ kind, runs, value (the largest) }], most runs first. */
+function limitsOf (runs) {
+  const by = new Map();
+  for (const r of runs) {
+    for (const { kind, value } of runLimits(r)) {
+      const l = by.get(kind) || { kind, runs: 0, value: null };
+      l.runs++;
+      if (value != null && (l.value == null || value > l.value)) l.value = value;
+      by.set(kind, l);
+    }
+  }
+  return [...by.values()].sort((a, b) => b.runs - a.runs);
+}
+
+const LIMIT_FLAGS = { smbSize: 'SMBs capped', uamSmbSize: 'SMBs capped', maxIob: 'max IOB reached', maxBasal: 'max basal reached', smbOff: 'SMBs off' };
+
 const nearest = (runs, t, max = 6 * MIN) => {
   let best = null;
   for (const r of runs) if (Math.abs(r.date - t) <= max && (!best || Math.abs(r.date - t) < Math.abs(best.date - t))) best = r;
@@ -232,7 +278,8 @@ export function loopMisses ({ readings, treatments, runs }, options = {}) {
     // What the loop dosed for in the hour before, typically.
     const expected = median(before.map(dosedFor));
     const run = before.reduce((a, b) => (Math.abs(dosedFor(b) - expected) < Math.abs(dosedFor(a) - expected) ? b : a));
-    const limited = within(runs, e.start - HOUR, e.at).filter((r) => LIMIT.test(r.reason || ''));
+    const limited = within(runs, e.start - HOUR, e.at).filter((r) => runLimits(r).length);
+    const limits = limitsOf(limited);
     const underestimated = expected != null && e.extreme - expected >= o.underestimate;
     if (!underestimated && !limited.length) continue;
     const from = e.start - HOUR;
@@ -241,7 +288,7 @@ export function loopMisses ({ readings, treatments, runs }, options = {}) {
     const isf = run.isf ?? null;
     const flags = [];
     if (underestimated) flags.push('underestimated');
-    if (limited.length) flags.push('held back by a limit');
+    for (const flag of new Set(limits.map((l) => LIMIT_FLAGS[l.kind]))) flags.push(flag);
     const early = within(carbs, e.start - 3 * HOUR, e.start - 15 * MIN);
     const late = within(carbs, e.start - 15 * MIN, e.at);
     if (late.length) flags.push('carbs logged late');
@@ -261,7 +308,7 @@ export function loopMisses ({ readings, treatments, runs }, options = {}) {
       expected: expectation(run),
       dosedFor: expected,
       limitedRuns: limited.length,
-      limit: limited[0]?.reason ?? null,
+      limits,
       // The insulin the loop would have asked for had it expected the peak.
       missing: expected != null && isf > 0 ? round(Math.max(0, (e.extreme - expected) / isf)) : null,
       flags,

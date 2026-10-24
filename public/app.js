@@ -67,6 +67,7 @@ const state = {
   misses: null, // the loop's misses (misses.js) in the last missDays, newest first
   missDays: stored('missDays', (v) => MISS_DAYS.includes(+v), 30, Number),
   missKind: 'all',
+  missShown: null, // start of the miss shown on the chart
   canReview: false, // the session may ask Claude
 };
 
@@ -1188,6 +1189,8 @@ function wireAnalysis () {
   });
   $('analysisClear').addEventListener('click', () => {
     reviewing?.abort();
+    state.missShown = null;
+    renderMisses();
     state.selecting = false;
     state.selection = null;
     review.request = null;
@@ -1254,7 +1257,7 @@ function renderMisses () {
   $('missesCount').hidden = false;
   $('missesCount').textContent = `${state.misses.length} in ${state.missDays} days`;
   $('missesStatus').textContent = `${lows} low${lows === 1 ? '' : 's'} after SMBs and ${state.misses.length - lows} under-dosed high${state.misses.length - lows === 1 ? '' : 's'} in the last ${state.missDays} days.`;
-  $('missesList').innerHTML = list.map((m) => `<li class="miss" data-miss="${m.start}">`
+  $('missesList').innerHTML = list.map((m) => `<li class="miss${m.start === state.missShown ? ' miss-shown' : ''}" data-miss="${m.start}"${m.start === state.missShown ? ' aria-current="true"' : ''}>`
     + `<button type="button" class="miss-show" title="Show it on the chart">`
     + `<span class="miss-time">${esc(dayHm(m.start, true))}</span>`
     + `<span class="tag ${m.kind === 'low' ? 'miss-low' : 'tag-warn'}">${m.kind === 'low' ? 'Low' : 'High'} ${esc(fmt(m.glucose / MGDL_PER_MMOL))}</span>`
@@ -1267,6 +1270,8 @@ function renderMisses () {
 
 /** Selects the miss's period and shows it on the chart. */
 function showMiss (m) {
+  state.missShown = m.start;
+  renderMisses();
   state.selection = missSelection(m);
   zoomTo(state.selection.from, state.selection.to);
   renderSelection();

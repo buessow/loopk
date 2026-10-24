@@ -149,6 +149,7 @@
 .miss-flags { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .tag.miss-low { background: color-mix(in srgb, var(--bg-low) 14%, transparent); color: var(--bg-low); }
 .miss-ask { flex: none; white-space: nowrap; }
+.miss.miss-shown { background: color-mix(in srgb, var(--color-accent) 10%, transparent); box-shadow: inset 3px 0 0 var(--color-accent); padding-left: var(--space-3); }
 .chart-empty { padding: var(--space-8); text-align: center; color: var(--color-neutral-700); }
 
 .notes {

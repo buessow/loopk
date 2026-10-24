@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { missNote, missSelection, missSummary } from '../public/misses.js';
+import { limitText, missNote, missSelection, missSummary } from '../public/misses.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -13,7 +13,8 @@ const LOW = {
 };
 const HIGH = {
   kind: 'high', start: t0, end: t0 + 14 * HOUR, glucose: 288, from: t0 - HOUR, smb: 4.95, dosedFor: 101,
-  missing: 3.87, limitedRuns: 8, expected: {}, flags: ['underestimated', 'held back by a limit'],
+  missing: 3.87, limitedRuns: 8, expected: {}, flags: ['underestimated', 'SMBs capped'],
+  limits: [{ kind: 'uamSmbSize', runs: 8, value: 0.6 }, { kind: 'maxIob', runs: 1, value: 10 }],
 };
 
 test('a low after SMBs reads as what the loop gave and expected', () => {
@@ -23,7 +24,14 @@ test('a low after SMBs reads as what the loop gave and expected', () => {
 
 test('an under-dosed high reads as what the loop dosed for and missed', () => {
   assert.equal(missSummary(HIGH, mmol), 'High of 16.0 mmol/L. In the hour before, the loop dosed for 5.6 mmol/L and gave 4.95 U of SMB.'
-    + ' Had it seen the peak coming it would have asked for about 3.87 U more. A limit capped 8 of its runs.');
+    + ' Had it seen the peak coming it would have asked for about 3.87 U more.'
+    + ' In 8 runs an SMB was cut to the SMB size limit of 0.6 U, set by "Max minutes of basal to limit SMB to for UAM" (IOB was more than the logged carbs needed).'
+    + ' In 1 run the loop asked for less because IOB would have gone over max IOB of 10 U ("Maximum total IOB OpenAPS can\'t go over").');
+});
+
+test('a max IOB of 0 reads as Low Glucose Suspend', () => {
+  assert.match(limitText({ kind: 'maxIob', runs: 3, value: 0 }), /^In 3 runs max IOB was 0 U, .*Low Glucose Suspend mode\)\.$/);
+  assert.match(limitText({ kind: 'maxBasal', runs: 1, value: 3.4 }), /^In 1 run the temp basal was cut to the max safe basal of 3\.4 U\/h/);
 });
 
 test('the selection runs from what led to the miss to just after it, at most 12 hours', () => {

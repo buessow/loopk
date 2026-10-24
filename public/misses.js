@@ -15,6 +15,28 @@ function before (from, to) {
   return m % 60 ? `the ${m} minutes` : `the ${m / 60} hours`;
 }
 
+const runs = (n) => `${n} run${n === 1 ? '' : 's'}`;
+const value = (v, unit) => (v == null ? '' : ` of ${Number(v.toFixed(2))} ${unit}`);
+
+/** A limit that held the loop back (src/analysis/misses.js, runLimits), with the AAPS setting behind it. */
+export function limitText ({ kind, runs: n, value: v }) {
+  switch (kind) {
+    case 'smbSize':
+      return `In ${runs(n)} an SMB was cut to the SMB size limit${value(v, 'U')}, set by "Max minutes of basal to limit SMB to".`;
+    case 'uamSmbSize':
+      return `In ${runs(n)} an SMB was cut to the SMB size limit${value(v, 'U')}, set by "Max minutes of basal to limit SMB to for UAM" (IOB was more than the logged carbs needed).`;
+    case 'maxIob':
+      if (v === 0) return `In ${runs(n)} max IOB was 0 U, so the loop could not take IOB above 0 (AAPS sets max IOB to 0 in Low Glucose Suspend mode).`;
+      return `In ${runs(n)} the loop asked for less because IOB would have gone over max IOB${value(v, 'U')} ("Maximum total IOB OpenAPS can't go over").`;
+    case 'maxBasal':
+      return `In ${runs(n)} the temp basal was cut to the max safe basal${value(v, 'U/h')} (max basal, or the max daily or current basal safety multiplier).`;
+    case 'smbOff':
+      return `In ${runs(n)} SMBs were switched off.`;
+    default:
+      return `In ${runs(n)} a limit held the loop back.`;
+  }
+}
+
 /** What happened, in one or two sentences. */
 export function missSummary (m, glucose) {
   const e = m.expected || {};
@@ -30,7 +52,7 @@ export function missSummary (m, glucose) {
   if (m.dosedFor != null) parts.push(`In the hour before, the loop dosed for ${glucose(m.dosedFor)}`);
   parts[parts.length - 1] += m.dosedFor != null ? ` and gave ${units(m.smb)} of SMB.` : '';
   if (m.missing != null) parts.push(`Had it seen the peak coming it would have asked for about ${units(m.missing)} more.`);
-  if (m.limitedRuns) parts.push(`A limit capped ${m.limitedRuns} of its runs.`);
+  for (const l of m.limits || []) parts.push(limitText(l));
   return parts.join(' ');
 }
 
