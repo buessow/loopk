@@ -44,12 +44,21 @@ function range (args, back, max) {
   return [from, to];
 }
 
+/**
+ * How the agent links the person to loopk's glucose page (public/view.js),
+ * or '' without a public URL.
+ */
+export function linkGuide (publicUrl) {
+  if (!publicUrl) return '';
+  return ` Link the person to what you discuss, so they can see it on loopk's glucose page: use a tool's link, or build one as ${publicUrl}/?start=<left edge of the chart, ISO 8601 to the minute with its offset, + written as %2B, e.g. 2026-10-24T06:00%2B02:00>&duration=<length: 90m, 3h, 1d, 7d; 15m to 30d>&show=<overlays to turn on, comma-separated: pred (predictions), basal (basal profile), loop (the loop algorithm's runs, targets and eventual glucose)>. Leave out start to show the latest; leave out show to keep the person's own overlays. Leave some room around a moment, e.g. start 30 minutes before it.`;
+}
+
 export function createMcpServer (ctx) {
   const { pool } = ctx;
   const server = new McpServer(
     { name: 'loopk', version: '1.0.0' },
     {
-      instructions: `loopk holds one person's type 1 diabetes data: CGM glucose, the treatments their AAPS (AndroidAPS) closed loop and they logged, and the loop's device status with its algorithm's decisions. Start with get_status for the present, get_statistics for a period, get_misses for times the loop dosed wrongly, and get_loop_runs for what the algorithm computed at each run. Read get_algorithm_guide before explaining loop decisions. Glucose comes in mmol/L unless you ask for mg/dL; times are local to the person (${RANGE_NOTE} in arguments). This is health data: it informs, it does not replace medical advice.`,
+      instructions: `loopk holds one person's type 1 diabetes data: CGM glucose, the treatments their AAPS (AndroidAPS) closed loop and they logged, and the loop's device status with its algorithm's decisions. Start with get_status for the present, get_statistics for a period, get_misses for times the loop dosed wrongly, and get_loop_runs for what the algorithm computed at each run. Read get_algorithm_guide before explaining loop decisions. Glucose comes in mmol/L unless you ask for mg/dL; times are local to the person (${RANGE_NOTE} in arguments).${linkGuide(ctx.config?.publicUrl)} This is health data: it informs, it does not replace medical advice.`,
     },
   );
 

@@ -5,6 +5,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { startServer, tokenFor } from './helpers.js';
 import { glucose, localTime, pageLink, summarize } from '../src/mcp/data.js';
+import { linkGuide } from '../src/mcp/server.js';
+import { parseView } from '../public/view.js';
 import { COLUMNS } from '../src/reports/index.js';
 
 const MIN = 60000;
@@ -160,6 +162,16 @@ test('glucose, statistics, misses and loop runs link to the glucose page showing
   assert.equal(miss.link, 'https://loopk.example/?start=2026-10-24T06:05%2B02:00&duration=125m&show=basal,loop');
   // Statistics cover the readings there are.
   assert.equal((await call('get_statistics', { from: '2025-11-01T00:00Z', to: range.to })).body.link, page);
+});
+
+test('the instructions tell the agent how to link to the glucose page', () => {
+  const instructions = client.getInstructions();
+  assert.match(instructions, /Link the person to what you discuss/);
+  assert.match(instructions, /https:\/\/loopk\.example\/\?start=<.*>&duration=<.*>&show=<.*>/);
+  // The format it describes is the page's.
+  const t = Date.UTC(2026, 9, 24, 4);
+  assert.deepEqual(parseView('?start=2026-10-24T06:00%2B02:00&duration=90m&show=basal,loop'), { start: t, duration: 90 * MIN, show: ['basal', 'loop'] });
+  assert.equal(linkGuide(''), '');
 });
 
 test('a link to a period longer than the page shows is its last 30 days, none without a public URL', () => {
