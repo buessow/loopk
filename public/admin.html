@@ -28,6 +28,13 @@
     </div>
   </section>
 
+  <section style="display:flex;flex-direction:column;gap:var(--space-3)" id="mcpSection">
+    <h3 style="margin:0">Agents (MCP)</h3>
+    <p class="text-muted" style="margin:0">An AI agent such as Claude Code, Codex (ChatGPT) or Gemini CLI can read the data through this server’s MCP endpoint: glucose, treatments, statistics such as GMI and time in range, the profile, the loop’s misses and what the algorithm computed at each run. It cannot change anything. The button creates a read-only token for it and the commands that add the server to each agent; in the ChatGPT app, turn on developer mode (Settings → Apps → Advanced settings) and create an app with the URL and no authentication. Delete the token above to take the access back.</p>
+    <div class="row"><button class="btn btn-primary" type="button" id="mcpCreate">Create agent token</button></div>
+    <div id="mcpResult" hidden style="flex-direction:column;gap:var(--space-3)"></div>
+  </section>
+
   <section style="display:flex;flex-direction:column;gap:var(--space-3)">
     <h3 style="margin:0">People</h3>
     <p class="text-muted" style="margin:0">Google accounts that may sign in to this site and see the data. Admins also manage access tokens and people here.</p>

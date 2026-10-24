@@ -23,8 +23,11 @@ function showError (err) {
   $('error').scrollIntoView({ block: 'nearest' });
 }
 
+let tokenNames = [];
+
 async function loadTokens () {
   const list = await call('GET', '/api/v2/authorization/subjects');
+  tokenNames = list.map((s) => s.name);
   $('tokens').innerHTML = list.map((s) => `<tr>
     <td>${esc(s.name)}</td><td>${s.canUploadModel ? 'Upload model' : s.canWrite ? 'Read &amp; write' : 'Read'}</td>
     <td class="mono">${esc(s.accessToken)}</td>
@@ -66,6 +69,35 @@ $('tokenForm').addEventListener('submit', async (e) => {
       name: $('tokenName').value, canWrite: access === 'write', canUploadModel: access === 'model',
     });
     $('tokenName').value = '';
+    await loadTokens();
+  } catch (err) { showError(err); }
+});
+
+// --- a token and command for an MCP agent -------------------------------------
+
+/** How each agent adds this server's MCP endpoint with the token, at user scope. */
+function mcpCommands (origin, accessToken) {
+  const url = `${origin}/mcp?token=${accessToken}`;
+  return [
+    ['Claude Code', `claude mcp add --scope user --transport http loopk '${url}'`],
+    ['Codex CLI (ChatGPT)', `codex mcp add loopk --url '${url}'`],
+    ['Gemini CLI', `gemini mcp add --scope user --transport http loopk '${url}'`],
+    ['MCP URL (ChatGPT app, other clients)', url],
+  ];
+}
+
+$('mcpCreate').addEventListener('click', async () => {
+  $('error').hidden = true;
+  try {
+    let name = 'agent';
+    for (let i = 2; tokenNames.includes(name); i++) name = `agent-${i}`;
+    const s = await call('POST', '/api/v2/authorization/subjects', { name, canWrite: false, canUploadModel: false, notes: 'MCP agent' });
+    $('mcpResult').innerHTML = mcpCommands(location.origin, s.accessToken).map(([label, text], i) => `<div class="field">
+      <label for="mcpCommand${i}">${esc(label)}</label>
+      <div class="row" style="align-items:stretch;flex-wrap:nowrap"><input class="input mono" id="mcpCommand${i}" readonly value="${esc(text)}" style="flex:1;min-width:0"><button class="btn btn-secondary" type="button" data-copy-token="${esc(text)}">Copy</button></div>
+    </div>`).join('');
+    $('mcpResult').hidden = false;
+    $('mcpResult').style.display = 'flex';
     await loadTokens();
   } catch (err) { showError(err); }
 });
