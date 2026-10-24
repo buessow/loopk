@@ -282,6 +282,7 @@ The TDD ratio behind *Adjust sensitivity* has two flaws in this code, and both s
 - **TDD feeds on itself.** More insulin raises TDD, which raises the ratio and makes the ISF smaller, which gives more insulin. The Dynamic ISF formula's TDD has the same loop, weighted to the last 4 hours, so ISF drops right after a big meal bolus.
 - **Unlogged food fools autosens.** A meal you neither log nor bolus looks like resistance until IOB reaches 2 × basal. Logging the carbs, even without a bolus, prevents it.
 - **Max IOB means different things.** In AMA it counts only loop insulin; in SMB and AutoISF it counts all insulin, your own boluses too. Switching from AMA needs a higher value.
+- **Duplicate glucose readings set max IOB to 0.** AAPS's glucose quality check (`BgQualityCheckPlugin`) looks at the newest readings (about the last 50 minutes). If two of them are at most 20 seconds apart, it calls them "doubled values" and limits max IOB to 0 U until the pair has aged out: no SMBs and no basal above the profile. The reason text then shows `max_iob 0.0`. Other causes of max IOB 0 are Low Glucose Suspend mode and an expired app build. Duplicates usually come from two glucose sources, or one source sending readings twice.
 - **A high temp target stops SMBs** unless *Enable SMB with high temp targets* is on, and in SMB it does not lower the basal ratio.
 
 ### Recommendations

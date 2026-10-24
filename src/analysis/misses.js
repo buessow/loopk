@@ -38,6 +38,10 @@ export const DEFAULTS = {
 
 // Readings run continuously unless they stop for longer than this.
 const GAP = 20 * MIN;
+// AAPS's glucose quality check (BgQualityCheckPlugin): two readings at most
+// 20 s apart among the newest 11 are "doubled values", and max IOB becomes 0.
+const DOUBLED = 20000;
+const DOUBLED_READINGS = 11;
 // Episodes this close to the one before are the same episode.
 const MERGE = 30 * MIN;
 // What held the loop back, as its reason says (oref0 determine-basal):
@@ -53,6 +57,9 @@ const LIMITS = [
 
 const READINGS = `SELECT date, sgv::float8 AS sgv FROM entries
    WHERE ${VALID_SGV} AND date >= $1 AND date < $2 ORDER BY date`;
+// Every reading AAPS had, deleted and simulated ones too, for the doubled-values check.
+const READING_TIMES = `SELECT date FROM entries
+   WHERE type = 'sgv' AND date >= $1 AND date < $2 ORDER BY date`;
 const TREATMENTS = `SELECT date, insulin::float8 AS insulin, carbs::float8 AS carbs,
      coalesce(type = 'SMB' OR is_smb, false) AS smb
    FROM treatments
@@ -164,9 +171,27 @@ const median = (values) => {
 };
 
 /**
+ * Whether AAPS saw doubled values at `t`: two of the newest 11 readings up
+ * to then at most 20 s apart. `times` are all reading times (ms), sorted.
+ */
+export function doubledAt (times, t) {
+  let hi = times.length;
+  for (let lo = 0; lo < hi;) {
+    const mid = (lo + hi) >> 1;
+    if (times[mid] <= t) lo = mid + 1;
+    else hi = mid;
+  }
+  for (let i = hi - 1; i > 0 && i > hi - DOUBLED_READINGS; i--) {
+    if (times[i] - times[i - 1] <= DOUBLED) return true;
+  }
+  return false;
+}
+
+/**
  * The limits a run hit: [{ kind, value }]. The SMB size limit is AAPS's
  * "Max minutes of basal to limit SMB to" of the basal, or the one "for UAM"
- * once IOB is more than the carbs on board need (kind 'uamSmbSize').
+ * once IOB is more than the carbs on board need (kind 'uamSmbSize'). Max
+ * IOB 0 while AAPS saw doubled readings (run.doubled) is kind 'duplicates'.
  */
 export function runLimits (run) {
   const text = run?.reason || '';
@@ -180,6 +205,7 @@ export function runLimits (run) {
       const mealInsulin = cr && Number(cr[1]) > 0 ? (run.cob || 0) / Number(cr[1]) : 0;
       if (run.iob > 0 && run.iob > mealInsulin) k = 'uamSmbSize';
     }
+    if (kind === 'maxIob' && Number(m[1]) === 0 && run.doubled) k = 'duplicates';
     out.push({ kind: k, value: m[1] != null ? Number(m[1]) : null });
   }
   return out;
@@ -199,7 +225,7 @@ function limitsOf (runs) {
   return [...by.values()].sort((a, b) => b.runs - a.runs);
 }
 
-const LIMIT_FLAGS = { smbSize: 'SMBs capped', uamSmbSize: 'SMBs capped', maxIob: 'max IOB reached', maxBasal: 'max basal reached', smbOff: 'SMBs off' };
+const LIMIT_FLAGS = { smbSize: 'SMBs capped', uamSmbSize: 'SMBs capped', maxIob: 'max IOB reached', maxBasal: 'max basal reached', smbOff: 'SMBs off', duplicates: 'duplicate readings' };
 
 const nearest = (runs, t, max = 6 * MIN) => {
   let best = null;
@@ -212,14 +238,18 @@ const nearest = (runs, t, max = 6 * MIN) => {
  * in mg/dL), newest first. Each has kind 'low' or 'high', start, end, the
  * extreme glucose and when, the insulin the loop and the person gave, what
  * the loop expected (from its run at the deciding moment) and an estimate
- * of the insulin too much (low) or too little (high).
+ * of the insulin too much (low) or too little (high). `readingTimes` are
+ * all reading times AAPS had (default: the readings'), for its
+ * doubled-values check; a high only listed because duplicates held the loop
+ * back has `causedByDuplicates`.
  */
-export function loopMisses ({ readings, treatments, runs }, options = {}) {
+export function loopMisses ({ readings, treatments, runs, readingTimes }, options = {}) {
   const o = { ...DEFAULTS, ...options };
   const smbs = treatments.filter((t) => t.smb && t.insulin > 0);
   const boluses = treatments.filter((t) => !t.smb && t.insulin > 0);
   const carbs = treatments.filter((t) => t.carbs > 0);
-  runs = uniqueRuns(runs);
+  const times = readingTimes || readings.map((r) => r.date);
+  runs = uniqueRuns(runs).map((r) => (/\bmax_?iob:?\s+0(\.0+)?\b/i.test(r.reason || '') ? { ...r, doubled: doubledAt(times, r.date) } : r));
   const out = [];
 
   const lows = episodes(readings, { below: o.low, end: o.lowEnd }).filter((e) => e.readings >= 2);
@@ -287,8 +317,11 @@ export function loopMisses ({ readings, treatments, runs }, options = {}) {
     const bolus = total(within(boluses, from - HOUR, e.at), 'insulin');
     const isf = run.isf ?? null;
     const flags = [];
+    // Listed only because doubled readings set max IOB to 0.
+    const causedByDuplicates = !underestimated && limits.every((l) => l.kind === 'duplicates');
+    if (causedByDuplicates) flags.push('caused by duplicate readings');
     if (underestimated) flags.push('underestimated');
-    for (const flag of new Set(limits.map((l) => LIMIT_FLAGS[l.kind]))) flags.push(flag);
+    for (const flag of new Set(limits.map((l) => LIMIT_FLAGS[l.kind]))) if (!causedByDuplicates) flags.push(flag);
     const early = within(carbs, e.start - 3 * HOUR, e.start - 15 * MIN);
     const late = within(carbs, e.start - 15 * MIN, e.at);
     if (late.length) flags.push('carbs logged late');
@@ -311,6 +344,7 @@ export function loopMisses ({ readings, treatments, runs }, options = {}) {
       limits,
       // The insulin the loop would have asked for had it expected the peak.
       missing: expected != null && isf > 0 ? round(Math.max(0, (e.extreme - expected) / isf)) : null,
+      causedByDuplicates,
       flags,
     });
   }
@@ -321,12 +355,14 @@ export function loopMisses ({ readings, treatments, runs }, options = {}) {
 export async function findMisses (pool, { from, to }, options = {}) {
   const start = new Date(from - DEFAULTS.lowLookback - HOUR);
   const end = new Date(to);
-  const [readings, treatments, runs] = await Promise.all([
+  const [readings, treatments, runs, times] = await Promise.all([
     pool.query(READINGS, [start, end]),
     pool.query(TREATMENTS, [start, end]),
     pool.query(RUNS, [start, end]),
+    pool.query(READING_TIMES, [start, end]),
   ]);
   const dated = (rows) => rows.map((r) => ({ ...r, date: ms(r.date) }));
-  return loopMisses({ readings: dated(readings.rows), treatments: dated(treatments.rows), runs: dated(runs.rows) }, options)
+  const readingTimes = times.rows.map((r) => ms(r.date));
+  return loopMisses({ readings: dated(readings.rows), treatments: dated(treatments.rows), runs: dated(runs.rows), readingTimes }, options)
     .filter((m) => m.start >= from);
 }

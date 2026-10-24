@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import { startServer, tokenFor } from './helpers.js';
-import { episodes, loopMisses, reasonPredictions, runLimits } from '../src/analysis/misses.js';
+import { doubledAt, episodes, loopMisses, reasonPredictions, runLimits } from '../src/analysis/misses.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -93,6 +93,47 @@ test('the limits a run hit are read from its reason, with the setting behind the
   const meal = 'COB: 40, Dev: 2.0, CR: 10, Target: 5.6; Eventual BG 12.4 >= 5.6,  insulinReq 1.73; maxBolus 0.4. Microbolusing 0.4U. adj. req. rate: 4.63 to maxSafeBasal: 3.4, temp 3.05 < 3.4U/hr.';
   assert.deepEqual(runLimits({ iob: 3, cob: 40, reason: meal }), [{ kind: 'smbSize', value: 0.4 }, { kind: 'maxBasal', value: 3.4 }]);
   assert.deepEqual(runLimits({ reason: 'Eventual BG 7.0 >= 6.0, insulinReq 0.2. Microbolusing 0.1U.' }), []);
+  // Max IOB 0 while AAPS saw doubled readings.
+  const zero = 'Target: 6.3; Eventual BG 22.3 >= 6.8, IOB 1.25 > max_iob 0.0; setting current basal of 0.99 as temp.';
+  assert.deepEqual(runLimits({ reason: zero, doubled: true }), [{ kind: 'duplicates', value: 0 }]);
+  assert.deepEqual(runLimits({ reason: zero }), [{ kind: 'maxIob', value: 0 }]);
+});
+
+test('doubled readings are two of the newest 11 at most 20 s apart, as AAPS checks', () => {
+  const times = [];
+  for (let m = 0; m <= 120; m += 5) times.push(t0 + m * MIN);
+  times.splice(7, 0, t0 + 30 * MIN + 15000);
+  times.sort((a, b) => a - b);
+  assert.equal(doubledAt(times, t0 + 25 * MIN), false);
+  assert.equal(doubledAt(times, t0 + 31 * MIN), true);
+  // 10 readings later the pair is still among the newest 11, one more and it is out.
+  assert.equal(doubledAt(times, t0 + 75 * MIN), true);
+  assert.equal(doubledAt(times, t0 + 80 * MIN), false);
+});
+
+test('a high is marked as caused by duplicate readings when they alone held the loop back', () => {
+  const readings = curve(t0, [[-90, 140], [0, 185], [60, 300], [120, 200], [180, 150]]);
+  // A second reading 10 s after the one 30 minutes before the rise.
+  const readingTimes = [...readings.map((r) => r.date), t0 - 30 * MIN + 10000].sort((a, b) => a - b);
+  const runs = [];
+  for (let m = -60; m <= 0; m += 5) {
+    const limited = m >= -25 ? ' IOB 1.2 > max_iob 0.0; setting current basal of 1.0 as temp.' : '';
+    runs.push({ date: t0 + m * MIN, bg: 180, eventual_bg: 290, target_bg: 100, isf: 50, reason: `Target: 100, minPredBG 280; Eventual BG 290 >= 100,${limited}` });
+  }
+  const [miss] = loopMisses({ readings, treatments: [], runs, readingTimes });
+  assert.equal(miss.kind, 'high');
+  assert.equal(miss.causedByDuplicates, true);
+  assert.deepEqual(miss.flags, ['caused by duplicate readings', 'no carbs logged']);
+  assert.deepEqual(miss.limits, [{ kind: 'duplicates', runs: 6, value: 0 }]);
+  // Without the second reading it is max IOB 0 of unknown cause.
+  const [plain] = loopMisses({ readings, treatments: [], runs });
+  assert.equal(plain.causedByDuplicates, false);
+  assert.deepEqual(plain.flags, ['max IOB reached', 'no carbs logged']);
+  // Underestimated as well: the duplicates only add to it.
+  const low = runs.map((r) => ({ ...r, eventual_bg: 180, reason: r.reason.replace('minPredBG 280', 'minPredBG 140') }));
+  const [both] = loopMisses({ readings, treatments: [], runs: low, readingTimes });
+  assert.equal(both.causedByDuplicates, false);
+  assert.deepEqual(both.flags, ['underestimated', 'duplicate readings', 'no carbs logged']);
 });
 
 let s;

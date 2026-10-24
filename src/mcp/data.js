@@ -279,7 +279,7 @@ export async function misses (pool, { from, to, units, timeZone, kind = 'all' })
         carbs: m.carbs,
         ...(m.kind === 'low'
           ? { excessUnits: m.excess, missedBy: glucose(m.missedBy, units), rescueCarbs: m.rescueCarbs, smbAfterRescueUnits: m.smbAfterRescue }
-          : { dosedFor: glucose(m.dosedFor, units), missingUnits: m.missing, limits: (m.limits || []).map((l) => ({ ...l, text: limitText(l) })) }),
+          : { dosedFor: glucose(m.dosedFor, units), missingUnits: m.missing, causedByDuplicates: m.causedByDuplicates, limits: (m.limits || []).map((l) => ({ ...l, text: limitText(l) })) }),
         expected,
       };
     }),

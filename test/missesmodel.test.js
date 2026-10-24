@@ -29,8 +29,11 @@ test('an under-dosed high reads as what the loop dosed for and missed', () => {
     + ' In 1 run the loop asked for less because IOB would have gone over max IOB of 10 U ("Maximum total IOB OpenAPS can\'t go over").');
 });
 
-test('a max IOB of 0 reads as Low Glucose Suspend', () => {
-  assert.match(limitText({ kind: 'maxIob', runs: 3, value: 0 }), /^In 3 runs max IOB was 0 U, .*Low Glucose Suspend mode\)\.$/);
+test('a max IOB of 0 names its causes, duplicate readings their own', () => {
+  assert.match(limitText({ kind: 'maxIob', runs: 3, value: 0 }), /^In 3 runs max IOB was 0 U, .*Low Glucose Suspend mode and when the app has expired\)\.$/);
+  assert.match(limitText({ kind: 'duplicates', runs: 6, value: 0 }), /^In 6 runs max IOB was 0 U because of duplicate glucose readings/);
+  const glucose = (v) => `${v} mg/dL`;
+  assert.match(missSummary({ kind: 'high', glucose: 300, causedByDuplicates: true, limits: [{ kind: 'duplicates', runs: 6, value: 0 }], expected: {} }, glucose), /^High of 300 mg\/dL, caused by duplicate glucose readings\. In 6 runs/);
   assert.match(limitText({ kind: 'maxBasal', runs: 1, value: 3.4 }), /^In 1 run the temp basal was cut to the max safe basal of 3\.4 U\/h/);
 });
 
