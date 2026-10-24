@@ -31,5 +31,8 @@ export function loadConfig (env = process.env) {
     // answers when the agent names none; else the profile's, which AAPS does
     // not always keep current.
     timeZone: env.TIME_ZONE || '',
+    // Where people open loopk, for links to the glucose page in the MCP
+    // server's answers; BASE_URL unless the server is reached elsewhere.
+    publicUrl: (env.PUBLIC_URL || baseUrl).replace(/\/$/, ''),
   };
 }

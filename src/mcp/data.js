@@ -11,6 +11,7 @@ import { algorithmPeriods, uniqueRuns } from '../analysis/prompt.js';
 import { findMisses, reasonPredictions, runLimits } from '../analysis/misses.js';
 import { limitText, missSummary } from '../../public/misses.js';
 import { gmiFromMmol } from '../../public/model.js';
+import { MAX_DURATION, MIN_DURATION, viewSearch } from '../../public/view.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -38,6 +39,18 @@ export function localTime (t, timeZone) {
   return `${local}${sign}${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`;
 }
 
+/**
+ * A link to the glucose page showing [from, to] (ms) with the overlays in
+ * `show` (view.js names; none: the reader's own), or null without a public
+ * URL. Longer than the page shows at once: its last MAX_DURATION.
+ */
+export function pageLink (publicUrl, { from, to, show, timeZone }) {
+  if (!publicUrl) return null;
+  const duration = Math.min(MAX_DURATION, Math.max(MIN_DURATION, to - from));
+  const start = to - duration;
+  return `${publicUrl}/${viewSearch({ start, duration, show }, { offsetMinutes: zoneOffset(start, timeZone) })}`;
+}
+
 /** The person's time zone: TIME_ZONE, else the profile's, else UTC. */
 export async function defaultTimeZone (ctx) {
   if (ctx.config?.timeZone) return ctx.config.timeZone;
@@ -47,12 +60,13 @@ export async function defaultTimeZone (ctx) {
 
 // --- glucose, treatments, heart rate -------------------------------------
 
-export async function glucoseReadings (pool, { from, to, units, timeZone }) {
+export async function glucoseReadings (pool, { from, to, units, timeZone, publicUrl }) {
   const { rows } = await pool.query(
     `SELECT date, sgv::float8 AS sgv, direction FROM entries WHERE ${VALID_SGV} AND date >= $1 AND date < $2 ORDER BY date`,
     [new Date(from), new Date(to)]);
   return {
     units,
+    link: pageLink(publicUrl, { from, to, timeZone }),
     columns: ['time', 'glucose', 'trend'],
     readings: rows.map((r) => [localTime(ms(r.date), timeZone), glucose(r.sgv, units), r.direction || null]),
   };
@@ -161,12 +175,13 @@ export const RANGES = {
   'mg/dL': { veryLow: '< 54', low: '54–69', target: '70–180', high: '181–250', veryHigh: '> 250' },
 };
 
-export async function statistics (pool, { from, to, units, timeZone, groupBy = 'none' }) {
+export async function statistics (pool, { from, to, units, timeZone, publicUrl, groupBy = 'none' }) {
   const totals = await hourlyTotals(pool, { from, to, timeZone });
   const out = {
     from: localTime(totals.from, timeZone),
     to: localTime(totals.to, timeZone),
     units,
+    link: pageLink(publicUrl, { from: totals.from, to: totals.to, timeZone }),
     ranges: RANGES[units],
     ...summarize(totals.rows, units),
   };
@@ -250,7 +265,10 @@ export async function profiles (pool, { from, to, timeZone }) {
 
 const MISS_GLUCOSE = ['bg', 'eventual', 'target', 'minPredBG', 'minGuardBG', 'IOBpredBG', 'COBpredBG', 'UAMpredBG'];
 
-export async function misses (pool, { from, to, units, timeZone, kind = 'all' }) {
+// The overlays a link to a miss or loop runs turns on.
+const LOOP_VIEW = ['basal', 'loop'];
+
+export async function misses (pool, { from, to, units, timeZone, publicUrl, kind = 'all' }) {
   const found = (await findMisses(pool, { from, to })).filter((m) => kind === 'all' || m.kind === kind);
   const text = (v) => `${glucose(v, units)} ${units}`;
   return {
@@ -267,6 +285,8 @@ export async function misses (pool, { from, to, units, timeZone, kind = 'all' })
       return {
         kind: m.kind,
         summary: missSummary(m, text),
+        // As the page's list selects it: from what led to it to 30 minutes after.
+        link: pageLink(publicUrl, { from: m.from, to: m.end + 30 * MIN, show: LOOP_VIEW, timeZone }),
         start: localTime(m.start, timeZone),
         end: localTime(m.end, timeZone),
         glucose: glucose(m.glucose, units),
@@ -329,7 +349,7 @@ const CURVES = `SELECT devicestatus_identifier AS id, source, curve, "values"
 
 const positive = (v) => (v != null && v >= 0 ? v : null);
 
-export async function loopRuns (pool, { from, to, units, timeZone, curves = false, console: withConsole = false }) {
+export async function loopRuns (pool, { from, to, units, timeZone, publicUrl, curves = false, console: withConsole = false }) {
   const [{ rows }, { rows: [config] }] = await Promise.all([
     pool.query(RUNS, [new Date(from), new Date(to), withConsole]),
     pool.query(CONFIGURATION, [new Date(to)]),
@@ -346,6 +366,7 @@ export async function loopRuns (pool, { from, to, units, timeZone, curves = fals
   }
   return {
     units,
+    link: pageLink(publicUrl, { from, to, show: LOOP_VIEW, timeZone }),
     notes: [
       'bg, eventual, target, isfPerUnit and the predictions are in the requested units; reason is as AAPS wrote it, in the profile units.',
       'insulinReq is the extra insulin the run wanted on top of IOB; smb is the SMB it decided, smbGiven what the pump confirmed.',

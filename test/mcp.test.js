@@ -4,7 +4,7 @@ import request from 'supertest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { startServer, tokenFor } from './helpers.js';
-import { glucose, localTime, summarize } from '../src/mcp/data.js';
+import { glucose, localTime, pageLink, summarize } from '../src/mcp/data.js';
 import { COLUMNS } from '../src/reports/index.js';
 
 const MIN = 60000;
@@ -18,7 +18,7 @@ let reader;
 let client;
 
 before(async () => {
-  s = await startServer({ TIME_ZONE: 'Europe/Zurich' });
+  s = await startServer({ TIME_ZONE: 'Europe/Zurich', PUBLIC_URL: 'https://loopk.example/' });
   const writer = await tokenFor(s.ctx, 'aaps');
   reader = await tokenFor(s.ctx, 'agent', { canWrite: false });
   const post = (col, doc) => request(s.app).post(`/api/v3/${col}`).set(auth(writer))
@@ -148,6 +148,25 @@ test('the profile reads in the asked unit, the status has the latest values', as
   assert.equal(st.loop.algorithm, 'SMB');
   assert.equal(st.profile.name, 'P');
   assert.ok('last24Hours' in st);
+});
+
+test('glucose, statistics, misses and loop runs link to the glucose page showing them', async () => {
+  const page = 'https://loopk.example/?start=2026-10-24T05:00%2B02:00&duration=4h';
+  assert.equal((await call('get_glucose', range)).body.link, page);
+  assert.equal((await call('get_statistics', range)).body.link, page);
+  assert.equal((await call('get_loop_runs', range)).body.link, `${page}&show=basal,loop`);
+  // A miss as the page's list selects it: from the hour before the low to 30 minutes after it.
+  const [miss] = (await call('get_misses', range)).body.misses;
+  assert.equal(miss.link, 'https://loopk.example/?start=2026-10-24T06:05%2B02:00&duration=125m&show=basal,loop');
+  // Statistics cover the readings there are.
+  assert.equal((await call('get_statistics', { from: '2025-11-01T00:00Z', to: range.to })).body.link, page);
+});
+
+test('a link to a period longer than the page shows is its last 30 days, none without a public URL', () => {
+  const to = Date.parse(range.to);
+  assert.equal(pageLink('https://loopk.example', { from: to - 90 * 24 * HOUR, to, timeZone: 'Europe/Zurich' }),
+    'https://loopk.example/?start=2026-09-24T09:00%2B02:00&duration=30d');
+  assert.equal(pageLink('', { from: t0, to }), null);
 });
 
 test('bad arguments are tool errors the agent can read', async () => {

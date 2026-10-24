@@ -23,6 +23,7 @@ const time = z.string().optional();
 const units = z.enum(['mmol/L', 'mg/dL']).optional().describe('Glucose unit of the answer (default mmol/L).');
 const timeZone = z.string().optional().describe('IANA time zone for the times in the answer (default the person\'s).');
 const RANGE_NOTE = 'from and to are ISO 8601 times (e.g. 2026-10-24T06:00+02:00) or epoch milliseconds';
+const LINK_NOTE = 'link opens it on loopk\'s glucose page, for the person to look at';
 
 class ToolError extends Error {}
 
@@ -56,7 +57,7 @@ export function createMcpServer (ctx) {
   const common = async (args) => {
     const tz = args.timeZone || await data.defaultTimeZone(ctx);
     if (!validTimeZone(tz)) throw new ToolError(`Unknown time zone ${tz}`);
-    return { units: args.units || 'mmol/L', timeZone: tz };
+    return { units: args.units || 'mmol/L', timeZone: tz, publicUrl: ctx.config?.publicUrl };
   };
   const tool = (name, config, fn) => server.registerTool(name, { ...config, annotations: { readOnlyHint: true, openWorldHint: false, ...config.annotations } }, async (args) => {
     try {
@@ -76,7 +77,7 @@ export function createMcpServer (ctx) {
 
   tool('get_statistics', {
     title: 'Glucose and insulin statistics',
-    description: `Statistics for a period (default the last 14 days, at most 366): readings and CGM coverage, mean glucose, SD, CV, GMI (glucose management indicator, %), time in the five standard ranges (very low, low, target, high, very high; percent of readings), insulin delivered (bolus incl. SMB, basal, the profile basal it replaced; totals and per day), carbs and mean heart rate. group_by "day" adds the same per local day, "hour_of_day" per hour of the day (0-23) over the period. ${RANGE_NOTE}.`,
+    description: `Statistics for a period (default the last 14 days, at most 366): readings and CGM coverage, mean glucose, SD, CV, GMI (glucose management indicator, %), time in the five standard ranges (very low, low, target, high, very high; percent of readings), insulin delivered (bolus incl. SMB, basal, the profile basal it replaced; totals and per day), carbs and mean heart rate. group_by "day" adds the same per local day, "hour_of_day" per hour of the day (0-23) over the period. ${RANGE_NOTE}; ${LINK_NOTE}.`,
     inputSchema: { from: time, to: time, group_by: z.enum(['none', 'day', 'hour_of_day']).optional(), units, timeZone },
   }, async (args) => {
     const [from, to] = range(args, 14 * DAY, 366 * DAY);
@@ -85,7 +86,7 @@ export function createMcpServer (ctx) {
 
   tool('get_glucose', {
     title: 'Glucose readings',
-    description: `CGM readings (about one per 5 minutes) with their trend arrows, for a period (default the last 24 hours, at most 14 days), as rows [time, glucose, trend]. ${RANGE_NOTE}.`,
+    description: `CGM readings (about one per 5 minutes) with their trend arrows, for a period (default the last 24 hours, at most 14 days), as rows [time, glucose, trend]. ${RANGE_NOTE}; ${LINK_NOTE}.`,
     inputSchema: { from: time, to: time, units, timeZone },
   }, async (args) => {
     const [from, to] = range(args, DAY, 14 * DAY);
@@ -127,7 +128,7 @@ export function createMcpServer (ctx) {
 
   tool('get_misses', {
     title: 'Where the loop got it wrong',
-    description: `The loop's misses in a period (default the last 30 days, at most 366), newest first. "low": a low below 3.9 mmol/L (70 mg/dL) after SMBs in the hour before it, more than the low left room for (excessUnits); flags such as "SMBs after rescue carbs" or "after a low"; missedBy is how far the low went below the lowest glucose the loop allowed for (minGuardBG). "high": a high above 13.9 (250) lasting 30 minutes that the loop dosed for far too mildly (dosedFor: what it sized insulin for; missingUnits: what it would have asked for had it seen the peak) or that a limit held back (limits: the SMB size limit, max IOB, max safe basal, with the AAPS setting behind it, or max IOB 0 from duplicate glucose readings; causedByDuplicates when that alone held it back). Each has a summary sentence and what the loop expected at the deciding run. Estimates from the loop's ISF, for finding patterns. ${RANGE_NOTE}.`,
+    description: `The loop's misses in a period (default the last 30 days, at most 366), newest first. "low": a low below 3.9 mmol/L (70 mg/dL) after SMBs in the hour before it, more than the low left room for (excessUnits); flags such as "SMBs after rescue carbs" or "after a low"; missedBy is how far the low went below the lowest glucose the loop allowed for (minGuardBG). "high": a high above 13.9 (250) lasting 30 minutes that the loop dosed for far too mildly (dosedFor: what it sized insulin for; missingUnits: what it would have asked for had it seen the peak) or that a limit held back (limits: the SMB size limit, max IOB, max safe basal, with the AAPS setting behind it, or max IOB 0 from duplicate glucose readings; causedByDuplicates when that alone held it back). Each has a summary sentence and what the loop expected at the deciding run. Estimates from the loop's ISF, for finding patterns. ${RANGE_NOTE}; ${LINK_NOTE} (one per miss).`,
     inputSchema: { from: time, to: time, kind: z.enum(['all', 'low', 'high']).optional(), units, timeZone },
   }, async (args) => {
     const [from, to] = range(args, 30 * DAY, 366 * DAY);
@@ -136,7 +137,7 @@ export function createMcpServer (ctx) {
 
   tool('get_loop_runs', {
     title: 'Loop algorithm internals',
-    description: `What the AAPS algorithm computed and decided at each run (about every 5 minutes) in a period (default the last 3 hours, at most 24; with console at most 3): algorithm and dynamic ISF, BG, eventual BG, target, ISF used, sensitivity ratio, IOB, basal IOB, COB, insulinReq, minPredBG, minGuardBG, where the IOB/COB/UAM predictions end, the temp basal and SMB it set, the limits it hit, and its reason text; plus the loop configuration (AAPS settings) and the algorithm periods. curves adds the predicted curves (one value per 5 minutes); console adds the algorithm's step-by-step log. Read get_algorithm_guide to interpret them. ${RANGE_NOTE}.`,
+    description: `What the AAPS algorithm computed and decided at each run (about every 5 minutes) in a period (default the last 3 hours, at most 24; with console at most 3): algorithm and dynamic ISF, BG, eventual BG, target, ISF used, sensitivity ratio, IOB, basal IOB, COB, insulinReq, minPredBG, minGuardBG, where the IOB/COB/UAM predictions end, the temp basal and SMB it set, the limits it hit, and its reason text; plus the loop configuration (AAPS settings) and the algorithm periods. curves adds the predicted curves (one value per 5 minutes); console adds the algorithm's step-by-step log. Read get_algorithm_guide to interpret them. ${RANGE_NOTE}; ${LINK_NOTE}.`,
     inputSchema: {
       from: time,
       to: time,

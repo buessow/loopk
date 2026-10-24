@@ -4,6 +4,7 @@ import { renderMarkdown } from './markdown.js';
 import { extractAnnotations } from './annotations.js';
 import { CURVES, algorithmName, algorithmPeriods, curvePoints, loopRuns, splitReason } from './loopruns.js';
 import { missNote, missSelection, missSummary } from './misses.js';
+import { OVERLAYS, parseView, viewSearch } from './view.js';
 import { applyChanges, cacheAvailable, cacheRange, cachedRange, cachedValue, clearCache, cursorFor, saveCursor, saveValue, useCacheFor } from './browser-cache.js';
 
 const $ = (id) => document.getElementById(id);
@@ -69,7 +70,13 @@ const state = {
   missKind: 'all',
   missShown: null, // start of the miss shown on the chart
   canReview: false, // the session may ask Claude
+  gesture: false, // a wheel pan is going on: the address is written when it ends
 };
+
+// The overlays as the address names them (view.js).
+const OVERLAY_STATE = { pred: 'showForecast', basal: 'showProfile', loop: 'showLoop' };
+// The view the page was opened with, applied before the remembered settings.
+const openedView = parseView(location.search);
 
 function stored (key, valid, fallback, parse = (v) => v) {
   try {
@@ -409,6 +416,7 @@ function pan (ms) {
   clampOffset();
   state.hoverT = null;
   scheduleRender();
+  writeView();
   ensureLoaded().catch(console.error);
 }
 
@@ -427,7 +435,34 @@ function zoomTo (from, to) {
   clampOffset();
   state.hoverT = null;
   render();
+  writeView();
   ensureLoaded().catch(console.error);
+}
+
+// --- the view in the address (view.js) ------------------------------------
+
+/**
+ * Applies a view from the address: its range, its start (else "now") and
+ * its overlays; what it leaves out stays as it is.
+ */
+function applyView (view) {
+  if (view.duration != null) state.hours = view.duration / HOUR;
+  if (view.show) for (const o of OVERLAYS) state[OVERLAY_STATE[o]] = view.show.includes(o);
+  state.offset = view.start == null ? 0 : Math.max(0, state.anchor - view.start - span());
+  clampOffset();
+  state.hoverT = null;
+}
+
+/** Writes the view to the address, unless a pan gesture is still going on. */
+function writeView () {
+  if (state.drag || state.gesture) return;
+  const { t0 } = windowTimes();
+  const search = viewSearch({
+    start: state.offset > 0 ? t0 : null,
+    duration: span(),
+    show: OVERLAYS.filter((o) => state[OVERLAY_STATE[o]]),
+  });
+  if (search !== location.search) history.replaceState(history.state, '', location.pathname + search + location.hash);
 }
 
 let frame = null;
@@ -1382,6 +1417,7 @@ function wireChart () {
     }
     if (!state.drag || e.pointerId !== state.drag.id) return;
     state.drag = null;
+    writeView();
     // Touch taps do not open a persistent value popover; values are available
     // through mouse hover on desktop.
     scheduleRender();
@@ -1406,12 +1442,20 @@ function wireChart () {
     state.hoverT = null;
     renderHover();
   });
-  // Horizontal scrolling (trackpad, or shift + wheel) pans.
+  // Horizontal scrolling (trackpad, or shift + wheel) pans. Wheel events
+  // have no end: the gesture ends once they pause.
+  let wheelEnd = null;
   wrap.addEventListener('wheel', (e) => {
     const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
     if (!d || !state.data) return;
     e.preventDefault();
+    state.gesture = true;
     pan(-d / geometry().iw * span());
+    clearTimeout(wheelEnd);
+    wheelEnd = setTimeout(() => {
+      state.gesture = false;
+      writeView();
+    }, 300);
   }, { passive: false });
 
   const setW = (w) => {
@@ -1432,6 +1476,7 @@ function wireOptions () {
     store('hours', state.hours);
     clampOffset();
     render();
+    writeView();
     ensureLoaded().catch(console.error);
   });
   $('glucoseStyle').addEventListener('change', (e) => {
@@ -1449,18 +1494,21 @@ function wireOptions () {
     store('profile', state.showProfile ? 1 : 0);
     $('legProfile').hidden = !state.showProfile;
     render();
+    writeView();
   });
   $('showForecast').addEventListener('change', (e) => {
     state.showForecast = e.target.checked;
     store('forecast', state.showForecast ? 1 : 0);
     $('legForecast').hidden = !state.showForecast;
     render();
+    writeView();
   });
   $('showLoop').addEventListener('change', (e) => {
     state.showLoop = e.target.checked;
     store('loop', state.showLoop ? 1 : 0);
     $('legLoop').hidden = !state.showLoop;
     render();
+    writeView();
   });
   $('earlier').addEventListener('click', () => pan(span() / 2));
   $('later').addEventListener('click', () => pan(-span() / 2));
@@ -1579,6 +1627,7 @@ async function main () {
   });
 
   setupTheme($('themeToggle'));
+  applyView(openedView);
   renderOptions();
   wireOptions();
   wireChart();
@@ -1599,6 +1648,8 @@ async function main () {
       loadRecent(),
     ]);
     if (first != null) state.earliest = first;
+    // A start older than the first guess of the earliest reading was cut: apply it again.
+    if (openedView.start != null) applyView({ start: openedView.start });
   } catch (err) {
     console.error(err);
     $('chartWrap').innerHTML = '<div class="chart-empty">Could not load data.</div>';
@@ -1606,6 +1657,14 @@ async function main () {
   }
   renderOptions();
   render();
+  writeView();
+  // Back and forward between addresses of this page.
+  window.addEventListener('popstate', () => {
+    applyView(parseView(location.search));
+    renderOptions();
+    render();
+    ensureLoaded().catch(console.error);
+  });
   ensureLoaded().catch(console.error);
   // Let the selected range paint before filling its 30-day buffers. Nested
   // animation frames ensure at least one browser paint happens first.
