@@ -2,6 +2,7 @@ import { buildModel, docTime, glucoseSeries, gmiFromMmol, insulinPerDay, timeInR
 import { setupTheme } from './theme.js';
 import { renderMarkdown } from './markdown.js';
 import { extractAnnotations } from './annotations.js';
+import { CURVES, algorithmName, algorithmPeriods, curvePoints, loopRuns, splitReason } from './loopruns.js';
 import { applyChanges, cacheAvailable, cacheRange, cachedRange, cachedValue, clearCache, cursorFor, saveCursor, saveValue, useCacheFor } from './browser-cache.js';
 
 const $ = (id) => document.getElementById(id);
@@ -50,6 +51,7 @@ const state = {
   style: stored('style', (v) => STYLES.includes(v), 'boxes'),
   showProfile: stored('profile', (v) => v === '0' || v === '1', true, (v) => v === '1'),
   showForecast: stored('forecast', (v) => v === '0' || v === '1', false, (v) => v === '1'),
+  showLoop: stored('loop', (v) => v === '0' || v === '1', false, (v) => v === '1'),
   offset: 0, // ms the window is panned back from the anchor
   W: 1200,
   hoverT: null,
@@ -364,6 +366,8 @@ function rebuild () {
     ...win, profile: recent.profile,
     start: state.loadedFrom, now: state.loadedTo ?? state.anchor,
   });
+  // What the loop decided at each run, for the loop overlay.
+  state.data.loop = loopRuns(win.devicestatus || []);
   clampOffset();
   render();
 }
@@ -688,6 +692,84 @@ function glucoseMarks ({ W, iw, X, GY, Ln, t0, t1, k }) {
   return out.join('');
 }
 
+// --- loop overlay: what AAPS's algorithm did at each run -------------------
+
+const LOOP_COLOR = { SMB: 'var(--color-neutral-600)', 'SMB + DynISF': 'var(--color-accent-600)', AUTO_ISF: 'var(--color-accent-2-600)' };
+const loopColor = (name) => LOOP_COLOR[name] || 'var(--color-neutral-600)';
+const LOOP_STRIP = 12;
+const CURVE_COLOR = { IOB: 'var(--color-accent-600)', ZT: 'var(--color-neutral-500)', UAM: 'var(--color-accent-2-600)', COB: 'var(--color-accent-900)' };
+
+/**
+ * The algorithm of the runs as a strip along the top of the glucose lane,
+ * the target each run used (dotted steps) and the eventual glucose it
+ * expected (open dots; above the lane, a small triangle under the strip).
+ */
+function loopOverlay ({ X, GY, Ln, t0, t1, k, padL, plotR }) {
+  const runs = state.data.loop.filter((r) => r.t >= t0 - HOUR && r.t <= t1);
+  const out = [];
+  for (const p of algorithmPeriods(runs)) {
+    const x0 = Math.max(padL, X(p.from));
+    const x1 = Math.min(plotR, X(p.to));
+    if (x1 <= x0) continue;
+    out.push(`<rect x="${f1(x0)}" y="${Ln.gT}" width="${f1(x1 - x0)}" height="${LOOP_STRIP}" style="fill:${loopColor(p.name)}"><title>${esc(p.name)}</title></rect>`);
+    if (x1 - x0 > 80) out.push(`<text x="${f1(x0 + 4)}" y="${Ln.gT + 9.5}" style="fill:var(--color-bg);font-family:var(--font-body);font-size:9px;font-weight:600;letter-spacing:0.06em;pointer-events:none">${esc(p.name)}</text>`);
+  }
+  let target = '';
+  let prev = null;
+  for (const r of runs) {
+    if (r.target == null) continue;
+    const x = f1(Math.max(padL, X(r.t)));
+    const y = f1(GY(r.target));
+    target += prev && r.t - prev.t <= 15 * MIN ? ` H${x} V${y}` : ` M${x} ${y}`;
+    prev = r;
+  }
+  if (prev) target += ` H${f1(Math.min(plotR, X(prev.t + 5 * MIN)))}`;
+  out.push(`<path d="${target.trim()}" style="fill:none;stroke:var(--color-accent-900);stroke-width:1.25;stroke-dasharray:1 3;stroke-linecap:round"></path>`);
+  const eventual = sampled(runs.filter((r) => r.eventual != null).map((r) => ({ t: r.t, v: r.eventual })), t0, t1, k);
+  for (const p of eventual) {
+    const x = f1(X(p.t));
+    const y = GY(p.v);
+    out.push(y < Ln.gT + LOOP_STRIP + 6
+      ? `<path d="M${x} ${Ln.gT + LOOP_STRIP + 3} l-3 5 h6 Z" style="fill:var(--color-accent-2-700)"></path>`
+      : `<circle cx="${x}" cy="${f1(y)}" r="2.4" style="fill:var(--color-bg);stroke:var(--color-accent-2-700);stroke-width:1.25"></circle>`);
+  }
+  return out.join('');
+}
+
+/** The curves a run predicted, from the run onwards, each labelled at its end. */
+function loopCurves (run, { X, GY, t1 }) {
+  return CURVES.map((c) => {
+    const pts = curvePoints(run, c).filter((p) => p.t <= t1);
+    if (pts.length < 2) return '';
+    const end = pts[pts.length - 1];
+    return `<path d="${linePath(pts, X, GY, 10 * MIN)}" style="fill:none;stroke:${CURVE_COLOR[c]};stroke-width:1.5;stroke-dasharray:5 3"></path>`
+      + `<text x="${f1(X(end.t) + 4)}" y="${f1(GY(end.v) + 4)}" style="fill:${CURVE_COLOR[c]};font-family:var(--font-body);font-size:10px;font-weight:600;paint-order:stroke;stroke:var(--color-bg);stroke-width:3px">${c}</text>`;
+  }).join('');
+}
+
+/** The hover rows of a loop run: algorithm, the values it decided on, the result. */
+function loopRows (r) {
+  const row = (name, value) => `<span style="color:var(--color-neutral-700)">${name}</span><span>${value}</span>`;
+  const g = (v) => (v == null ? '–' : fmt(v));
+  const { values, decision } = splitReason(r.reason);
+  const preds = values.filter(([n]) => /^(Dev|BGI|minPredBG|minGuardBG|IOBpredBG|COBpredBG|UAMpredBG)$/.test(n));
+  const result = [
+    r.rate != null ? `temp ${r.rate.toFixed(2)} U/h${r.duration ? ` for ${Math.round(r.duration)} min` : ''}` : null,
+    r.smb > 0 ? `SMB ${r.smb} U${r.smbGiven != null && r.smbGiven !== r.smb ? ` (given ${r.smbGiven} U)` : ''}` : null,
+  ].filter(Boolean).join(', ') || 'no change';
+  return `<div style="grid-column:span 2;border-top:1px solid var(--color-divider);margin-top:2px;padding-top:4px;font-weight:600">Loop at ${hm(r.t)} · ${esc(algorithmName(r))}</div>`
+    + row('Glucose → eventual', `${g(r.bg)} → ${g(r.eventual)}`)
+    + row('Target', g(r.target))
+    + row('ISF used', r.isf == null ? '–' : `${g(r.isf)} per U`)
+    + row('Sensitivity ratio', r.sensitivityRatio == null ? '–' : r.sensitivityRatio.toFixed(2))
+    + row('IOB · COB', `${r.iob == null ? '–' : r.iob.toFixed(2) + ' U'} · ${r.cob == null ? '–' : Math.round(r.cob) + ' g'}`)
+    // AAPS's insulinReq: what its prediction (which counts IOB) says is still missing.
+    + row('Extra insulin needed<br><span style="font-size:11px">on top of IOB</span>', r.insulinReq == null ? '–' : r.insulinReq.toFixed(2) + ' U')
+    + (preds.length ? `<span style="grid-column:span 2;color:var(--color-neutral-700);font-size:11px">From its reason: ${esc(preds.map(([n, v]) => `${n} ${v}`).join(' · '))}</span>` : '')
+    + `<span style="grid-column:span 2">${r.enacted ? 'Set' : 'Suggested'}: <b>${esc(result)}</b></span>`
+    + (decision ? `<span style="grid-column:span 2;color:var(--color-neutral-700);font-size:11px">${esc(decision)}</span>` : '');
+}
+
 function renderChart () {
   const D = state.data;
   const geo = geometry();
@@ -794,6 +876,8 @@ function renderChart () {
     labels.push([f1(x + 9), f1(y - 7), fmt(e.v), 'fill:var(--color-text)']);
   }
 
+  if (state.showLoop) push(loopOverlay(geo));
+
   // Heart rate.
   const hw = sampled(D.hr, t0, t1, k);
   push(`<path d="${linePath(hw, X, HY, Math.max(20, 10 * k) * MIN)}" style="fill:none;stroke:var(--color-neutral-700);stroke-width:1.5;stroke-linejoin:round"></path>`);
@@ -899,14 +983,20 @@ function renderHover () {
     ? FORECAST_LINES.map(([m]) => [m, nearest((D.forecast[m] || []).filter((q) => Math.abs(q.t - t) <= 5 * MIN), t, 5 * MIN)])
     : [];
   const marks = state.annotations.filter((a) => t >= a.from - 5 * MIN * k && t <= a.to + 5 * MIN * k);
-  // Wider with the prediction rows or Claude's marks, so their labels fit.
-  const boxW = marks.length ? 260 : predicted.length ? 216 : 180;
-  const left = Math.round(x > W - boxW - 40 ? x - boxW - 14 : x + 14);
+  // The loop run nearest the pointer, with what it predicted.
+  const run = state.showLoop ? nearest(D.loop.filter((r) => Math.abs(r.t - t) <= Math.max(6, 5 * k) * MIN), t, Math.max(6, 5 * k) * MIN) : null;
+  // Wider with the loop, the prediction rows or Claude's marks, so their labels fit.
+  const boxW = run ? 300 : marks.length ? 260 : predicted.length ? 216 : 180;
+  // With a loop run, on the left: its predicted curves run to the right.
+  const onLeft = run ? x > boxW + 40 : x > W - boxW - 40;
+  const left = Math.round(onLeft ? x - boxW - 14 : x + 14);
   const time = state.hours > 24 || state.offset > 0 ? dayHm(t) : hm(t);
   g.innerHTML = `<line x1="${f1(x)}" x2="${f1(x)}" y1="${Ln.bT}" y2="${axis}" style="stroke:var(--color-text);stroke-width:1"></line>`
     + (p ? `<circle cx="${f1(x)}" cy="${f1(GY(p.v))}" r="5" style="fill:none;stroke:var(--color-text);stroke-width:1.5"></circle>` : '')
     + (h ? `<circle cx="${f1(x)}" cy="${f1(HY(h.v))}" r="4" style="fill:none;stroke:var(--color-text);stroke-width:1.5"></circle>` : '')
-    + `<foreignObject x="${left}" y="${Ln.gT}" width="${boxW + 16}" height="${140 + 20 * predicted.length + 40 * marks.length}" style="pointer-events:none"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${boxW}px;margin:4px;background:var(--color-bg);border:1px solid var(--color-text);box-shadow:var(--shadow-md);padding:var(--space-2) var(--space-3);display:grid;grid-template-columns:1fr auto;gap:2px var(--space-3);font-size:12px">`
+    + (run ? loopCurves(run, { X, GY, t1 }) : '')
+    // With a loop run the window is long: it starts at the top of the chart.
+    + `<foreignObject x="${left}" y="${run ? Ln.bT : Ln.gT}" width="${boxW + 16}" height="${140 + 20 * predicted.length + 40 * marks.length + (run ? 300 : 0)}" style="pointer-events:none"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${boxW}px;margin:4px;background:var(--color-bg);border:1px solid var(--color-text);box-shadow:var(--shadow-md);padding:var(--space-2) var(--space-3);display:grid;grid-template-columns:1fr auto;gap:2px var(--space-3);font-size:12px">`
     + `<div style="grid-column:span 2;font-family:var(--font-heading);font-weight:600;font-size:15px">${time}</div>`
     + `<span style="color:var(--color-neutral-700)">Glucose</span><span>${p ? fmt(p.v) + ' ' + unit() : '–'}</span>`
     + predicted.map(([m, q]) => `<span style="color:var(--color-neutral-700)">Predicted ${m} min ago</span><span>${q ? fmt(q.v) : '–'}</span>`).join('')
@@ -914,6 +1004,7 @@ function renderHover () {
     + (state.showProfile ? `<span style="color:var(--color-neutral-700)">Profile</span><span>${sg ? sg.prof.toFixed(2) + ' U/h' : '–'}</span>` : '')
     + `<span style="color:var(--color-neutral-700)">COB</span><span>${cob ? Math.round(cob.v) + ' g' : '–'}</span>`
     + `<span style="color:var(--color-neutral-700)">Heart rate</span><span>${h ? h.v + ' bpm' : '–'}</span>`
+    + (run ? loopRows(run) : '')
     + marks.map((a) => `<span style="grid-column:span 2;border-top:1px solid var(--color-divider);padding-top:2px"><b style="color:${MARK_COLOR[a.kind]}">(${a.n}) ${MARK_LABEL[a.kind]}</b> ${esc(a.text)}</span>`).join('')
     + '</div></foreignObject>';
 }
@@ -931,6 +1022,8 @@ function renderOptions () {
   $('legProfile').hidden = !state.showProfile;
   $('showForecast').checked = state.showForecast;
   $('legForecast').hidden = !state.showForecast;
+  $('showLoop').checked = state.showLoop;
+  $('legLoop').hidden = !state.showLoop;
 }
 
 function render () {
@@ -1360,7 +1453,8 @@ async function main () {
   await useCacheFor(session.user.email).catch(() => {});
   $('adminLink').hidden = !session.isAdmin;
   // Reviews need an Anthropic API key (Access page).
-  $('askClaude').hidden = !session.claude;
+  $('analysis').hidden = !session.claude;
+  state.canReview = !!session.claude;
   // Sport mode, once an admin set it up (Access page).
   if (session.sport) loadSport().catch(console.error);
   $('signOut').addEventListener('click', async () => {
