@@ -6,6 +6,7 @@ import { signInUser } from '../src/web/session.js';
 import { changedProfile, historyWithChanges, parseChanges } from '../src/oref/simulate.js';
 import { glucoseStats } from '../src/oref/period.js';
 import { loadSettingsTimeline } from '../src/oref/settings.js';
+import { saveTestProfile, validProfile } from '../src/oref/testprofile.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -138,6 +139,48 @@ test('a stored profile can stand in for the one recorded', async () => {
   assert.match(body.baseline.reason, /ISF: 50,/);
   assert.match(body.changed.reason, /ISF: 100,/);
   await run({ profile: { name: 'Nope' } }).expect(400);
+});
+
+test('the AI Test profile is simulated with, and an admin copies it into a profile of the store', async () => {
+  await run({ profile: { name: 'AI Test' } }).expect(400);
+  const flat = (v) => [[0, v]];
+  await saveTestProfile(s.ctx.pool, {
+    profile: { dia: 6, units: 'mg/dl', basal: flat(0.8), isf: flat(100), ic: flat(12), targetLow: flat(110), targetHigh: flat(110) },
+    basedOn: 'Default', note: 'weaker ISF',
+  }, 'agent');
+  // offered on the simulate page and used like a stored profile
+  const settings = (await request(s.app).get(`/api/simulate/settings?at=${T}`).set(auth(reader)).expect(200)).body;
+  assert.equal(settings.profiles[0], 'AI Test');
+  const { body } = await run({ profile: { name: 'AI Test' } }).expect(200);
+  assert.match(body.changed.reason, /ISF: 100,/);
+
+  const view = (await request(s.app).get('/api/simulate/test-profile').set(auth(reader)).expect(200)).body;
+  assert.equal(view.profile.note, 'weaker ISF');
+  assert.deepEqual(view.stores.map((p) => [p.name, p.inStore]), [['Half', true], ['Default', false]]);
+
+  // only admins copy, into a profile the store has
+  await request(s.app).post('/api/simulate/test-profile/copy').set(auth(reader)).send({ to: 'Half' }).expect(403);
+  await request(s.app).post('/api/simulate/test-profile/copy').set('Cookie', cookie).send({ to: 'Nope' }).expect(404);
+  await request(s.app).post('/api/simulate/test-profile/copy').set('Cookie', cookie).send({ to: 'Half' }).expect(200);
+  // AAPS reads the new profile store: Half has the AI Test schedules
+  const [doc] = (await request(s.app).get('/api/v3/profile?sort$desc=date&limit=1').set(auth(reader)).expect(200)).body.result;
+  assert.equal(doc.store.Half.dia, 6);
+  assert.deepEqual(doc.store.Half.sens, [{ time: '00:00', timeAsSeconds: 0, value: 100 }]);
+  assert.deepEqual(doc.store.Half.basal, [{ time: '00:00', timeAsSeconds: 0, value: 0.8 }]);
+  assert.equal(doc.store.Half.timezone, 'UTC');
+
+  await request(s.app).delete('/api/simulate/test-profile').set('Cookie', cookie).expect(200);
+  assert.equal((await request(s.app).get('/api/simulate/test-profile').set(auth(reader)).expect(200)).body.profile, null);
+});
+
+test('a test profile needs whole schedules that start at midnight', () => {
+  const ok = { dia: 5, units: 'mmol', basal: [[0, 1]], isf: [[0, 3]], ic: [[0, 10]], targetLow: [[0, 5.5]], targetHigh: [[0, 6]] };
+  assert.equal(validProfile(ok).units, 'mmol');
+  assert.throws(() => validProfile({ ...ok, basal: [[3600, 1]] }), /must start at 00:00/);
+  assert.throws(() => validProfile({ ...ok, basal: [[0, 1], [0, 2]] }), /times must go up/);
+  assert.throws(() => validProfile({ ...ok, isf: [[0, 100]] }), /isf: values must be/);
+  assert.throws(() => validProfile({ ...ok, targetHigh: [[0, 5]] }), /below the low target/);
+  assert.throws(() => validProfile({ ...ok, dia: 1 }), /DIA/);
 });
 
 test('a period lists every miss and the decisions of the simulated loop', async () => {

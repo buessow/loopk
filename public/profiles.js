@@ -8,6 +8,7 @@ import { PERIODS, periodRange } from './reports-model.js';
 import { chartSeries, combinePcts, rowSummary } from './profiles-model.js';
 import { clearCache } from './browser-cache.js';
 import { setupTheme } from './theme.js';
+import { compareDefault, compareRows } from './testprofile-model.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -66,8 +67,12 @@ function setStatus (text, warn = false) {
   $('status').classList.toggle('tag-warn', warn);
 }
 
-async function call (path) {
-  const res = await fetch(path, { credentials: 'same-origin' });
+async function call (path, { method = 'GET', body } = {}) {
+  const res = await fetch(path, {
+    method,
+    credentials: 'same-origin',
+    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+  });
   if (res.status === 401) {
     location.href = '/login';
     throw new Error('signed out');
@@ -223,6 +228,77 @@ function drawCharts (profile, body) {
   charts.set(`${profile.key}:ratio`, hourChart(canvas, ratio, { title: 'Ratio', beginAtZero: false }));
 }
 
+// --- the AI Test profile -----------------------------------------------------
+
+const test = { view: null, compare: null, isAdmin: false };
+
+function testStatus (text, warn = false) {
+  $('testProfileStatus').textContent = text;
+  $('testProfileStatus').hidden = !text;
+  $('testProfileStatus').classList.toggle('tag-warn', warn);
+}
+
+function renderTestProfile () {
+  const v = test.view;
+  const p = v?.profile;
+  $('testProfile').hidden = !p;
+  if (!p) return;
+  const when = new Date(p.updatedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  $('testProfileMeta').textContent = `${p.basedOn ? `from ${p.basedOn}, ` : ''}written ${when}${p.updatedBy ? ` by ${p.updatedBy}` : ''}`;
+  $('testProfileNote').textContent = p.note || '';
+  const names = v.stores.map((s) => s.name);
+  if (!names.includes(test.compare)) test.compare = compareDefault(v);
+  $('testProfileCompare').innerHTML = v.stores.map((s) => `<option value="${esc(s.name)}"${s.name === test.compare ? ' selected' : ''}>${esc(s.name)}${s.inStore ? '' : ' (not in the profile store)'}</option>`).join('');
+  $('testProfileCompare').disabled = !names.length;
+  const other = v.stores.find((s) => s.name === test.compare) || null;
+  $('testProfileCopy').hidden = !test.isAdmin || !other?.inStore;
+  if (test.isAdmin && other && !other.inStore && !$('testProfileStatus').classList.contains('tag-warn')) testStatus(`${other.name} isn't in the profile store AAPS uploaded: it can't be copied into.`);
+  $('testProfileCopy').textContent = other ? `Copy into ${other.name}` : 'Copy into this profile';
+  $('testProfileDelete').hidden = !test.isAdmin;
+  $('testProfileAdminNote').hidden = !test.isAdmin;
+  $('testProfileTable').innerHTML = `<thead><tr><th>Schedule</th><th>AI Test</th><th>${esc(other?.name ?? '–')}</th></tr></thead><tbody>`
+    + compareRows(p, other).map(([label, a, b, differs]) => `<tr><th>${esc(label)}</th><td${differs ? ' class="differs"' : ''}>${esc(a)}</td><td>${esc(b)}</td></tr>`).join('')
+    + '</tbody>';
+}
+
+async function loadTestProfile () {
+  try {
+    test.view = await call('/api/simulate/test-profile');
+  } catch (err) {
+    test.view = null;
+    console.error(err);
+  }
+  renderTestProfile();
+}
+
+function wireTestProfile () {
+  $('testProfileCompare').addEventListener('change', (e) => {
+    test.compare = e.target.value;
+    testStatus('');
+    renderTestProfile();
+  });
+  $('testProfileCopy').addEventListener('click', async () => {
+    const to = test.compare;
+    if (!to || !confirm(`Replace the schedules and DIA of ${to} with those of AI Test? This writes a new profile store, which AAPS receives.`)) return;
+    try {
+      await call('/api/simulate/test-profile/copy', { method: 'POST', body: { to, utcOffset: -new Date().getTimezoneOffset() } });
+      await loadTestProfile();
+      testStatus(`Copied into ${to}. Check on the phone that the profile store arrived, then switch to ${to}.`);
+    } catch (err) {
+      testStatus(err.message, true);
+    }
+  });
+  $('testProfileDelete').addEventListener('click', async () => {
+    if (!confirm('Delete the AI Test profile? Agents can write it again.')) return;
+    try {
+      await call('/api/simulate/test-profile', { method: 'DELETE' });
+      await loadTestProfile();
+    } catch (err) {
+      testStatus(err.message, true);
+    }
+  });
+}
+
 // --- data and controls -----------------------------------------------------
 
 async function load () {
@@ -302,6 +378,7 @@ async function main () {
   }
   const session = await res.json();
   $('adminLink').hidden = !session.isAdmin;
+  test.isAdmin = !!session.isAdmin;
   $('signOut').addEventListener('click', async () => {
     await clearCache().catch(() => {});
     await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
@@ -310,7 +387,8 @@ async function main () {
   setupTheme($('themeToggle'));
   renderControls();
   wire();
-  await load();
+  wireTestProfile();
+  await Promise.all([load(), loadTestProfile()]);
 }
 
 main().catch((err) => setStatus(err.message, true));

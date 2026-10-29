@@ -45,6 +45,15 @@ recorded percentage unless one is given). The MCP tools are
 `simulate_run`, `simulate_period` and `get_loop_settings`
 (`src/mcp/simulate.js`).
 
+**The AI Test profile.** Agents can write a whole profile to simulate
+with: `set_test_profile` (MCP) saves it as "AI Test" in its own table
+(`test_profiles`, `src/oref/testprofile.js`), outside the profile
+collection, so AAPS never receives it; `simulate_run` and `simulate_period`
+take it as profile name "AI Test". The Profiles page shows it next to a
+profile of the store, and an admin can copy it into that profile: a new
+profile store document with that profile's schedules and DIA replaced,
+which AAPS takes with "Receive profile store" on.
+
 **Conformance (phase 1).** All 89 cases in `test/oref.test.js` match.
 Synthetic cases go further: `scripts/oref-cases.js` generates random loop
 runs (glucose from 39 to 400, falling and rising, stale and flat; negative

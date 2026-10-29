@@ -1,7 +1,8 @@
 // An MCP server (Model Context Protocol) at /mcp, for agents that look into
 // the person's diabetes data: glucose, treatments, statistics such as time
 // in range and GMI, the profile, the loop's misses, the AAPS loop's internal
-// values per run, and a description of how AAPS doses. Read-only. Stateless
+// values per run, and a description of how AAPS doses. Read-only, except for
+// the "AI Test" profile agents simulate with, which AAPS never sees. Stateless
 // Streamable HTTP: each request gets its own server. It takes the same access
 // as the API (an access token as ?token=, a Bearer JWT or a session) and
 // needs read access to entries, treatments and device status.
@@ -56,12 +57,12 @@ export function linkGuide (publicUrl) {
   return ` Link the person to what you discuss, so they can see it on loopk's glucose page: use a tool's link, or build one as ${publicUrl}/?start=<left edge of the chart, ISO 8601 to the minute with its offset, + written as %2B, e.g. 2026-10-24T06:00%2B02:00>&duration=<length: 90m, 3h, 1d, 7d; 15m to 30d>&show=<overlays to turn on, comma-separated: pred (predictions), basal (basal profile), loop (the loop algorithm's runs, targets and eventual glucose)>. Leave out start to show the latest; leave out show to keep the person's own overlays. Leave some room around a moment, e.g. start 30 minutes before it.`;
 }
 
-export function createMcpServer (ctx) {
+export function createMcpServer (ctx, { by = null } = {}) {
   const { pool } = ctx;
   const server = new McpServer(
     { name: 'loopk', version: '1.0.0' },
     {
-      instructions: `loopk holds one person's type 1 diabetes data: CGM glucose, the treatments their AAPS (AndroidAPS) closed loop and they logged, and the loop's device status with its algorithm's decisions. Start with get_status for the present, get_statistics for a period, get_misses for times the loop dosed wrongly, and get_loop_runs for what the algorithm computed at each run. Read get_algorithm_guide before explaining loop decisions. For "what if" questions about settings, simulate_run decides a run again with changes (exact) and simulate_period estimates a period (with a band; mind its limits); get_loop_settings lists the settings. Glucose comes in mmol/L unless you ask for mg/dL; times are local to the person (${RANGE_NOTE} in arguments).${linkGuide(ctx.config?.publicUrl)} This is health data: it informs, it does not replace medical advice.`,
+      instructions: `loopk holds one person's type 1 diabetes data: CGM glucose, the treatments their AAPS (AndroidAPS) closed loop and they logged, and the loop's device status with its algorithm's decisions. Start with get_status for the present, get_statistics for a period, get_misses for times the loop dosed wrongly, and get_loop_runs for what the algorithm computed at each run. Read get_algorithm_guide before explaining loop decisions. For "what if" questions about settings, simulate_run decides a run again with changes (exact) and simulate_period estimates a period (with a band; mind its limits); get_loop_settings lists the settings. To try a whole other profile, write it as the "AI Test" profile with set_test_profile and simulate with profile name "AI Test"; it stays in loopk, and the person can copy it into a real profile on loopk's Profiles page. Glucose comes in mmol/L unless you ask for mg/dL; times are local to the person (${RANGE_NOTE} in arguments).${linkGuide(ctx.config?.publicUrl)} This is health data: it informs, it does not replace medical advice.`,
     },
   );
 
@@ -168,7 +169,7 @@ export function createMcpServer (ctx) {
     settings: z.record(z.string(), z.union([z.number(), z.boolean(), z.null()])).optional()
       .describe('AAPS settings by the names get_loop_settings lists (e.g. max_iob, maxSMBBasalMinutes, maxUAMSMBBasalMinutes, SMBInterval, enableUAM, enableSMB_always, smb_delivery_ratio, iob_threshold_percent, dynIsfAdjustmentFactor); glucose values in mg/dL as AAPS keeps them.'),
     profile: z.object({
-      name: z.string().optional().describe('Switch to this stored profile (get_profile_usage names them) instead of the one in effect, at the percentage in effect unless percentage is given.'),
+      name: z.string().optional().describe('Switch to this stored profile (get_profile_usage names them), or to "AI Test" for the test profile (set_test_profile), instead of the one in effect, at the percentage in effect unless percentage is given.'),
       percentage: z.number().optional().describe('Profile percentage (10-500), replacing the one in effect: basal × p, ISF and carb ratio ÷ p.'),
       isfFactor: z.number().optional().describe('Multiplies the ISF schedule.'),
       carbRatioFactor: z.number().optional().describe('Multiplies the carb-ratio schedule.'),
@@ -216,6 +217,32 @@ export function createMcpServer (ctx) {
     return simulate.period(pool, { from, to: Math.min(to, Date.now()), changes: args.changes, k, ...await common(args) });
   });
 
+  const schedule = (what) => z.array(z.tuple([z.string(), z.number()])).optional()
+    .describe(`${what} as [["HH:MM", value], ...] from 00:00, replacing the whole schedule; leave out to keep it.`);
+  tool('get_test_profile', {
+    title: 'The AI Test profile',
+    description: 'The "AI Test" profile agents edit with set_test_profile to simulate with (profile name "AI Test" in simulate_run and simulate_period): its schedules (basal U/h, ISF glucose per U, carb ratio g per U, targets), DIA, the profile it started from and the note on what was changed and why. It stays in loopk: AAPS never receives it. link opens loopk\'s Profiles page, where the person can compare it and copy it into a real profile.',
+    inputSchema: { units, timeZone },
+  }, async (args) => simulate.testProfile(pool, await common(args)));
+
+  tool('set_test_profile', {
+    title: 'Write the AI Test profile',
+    description: 'Creates or changes the "AI Test" profile, to simulate with as profile name "AI Test". It starts from based_on (a stored profile, as get_profile_usage names them), or the AI Test profile as it is, or else the profile switched to last; each schedule given replaces that whole schedule, the others are kept. Schedules are at 100%; simulations apply the percentage in effect unless one is given. Glucose (ISF, targets) in the units argument. This changes nothing on the phone: the profile stays in loopk until the person copies it into a real profile on loopk\'s Profiles page. Write in note what you changed and why, for the person to read there. Returns the profile as get_test_profile.',
+    inputSchema: {
+      based_on: z.string().optional().describe('Start from this stored profile instead of the AI Test profile as it is.'),
+      dia_hours: z.number().optional().describe('Duration of insulin action, hours (2-10).'),
+      basal: schedule('Basal, U/h,'),
+      isf: schedule('ISF, glucose per U in the units argument,'),
+      carb_ratio: schedule('Carb ratio, g per U,'),
+      target_low: schedule('Low target, in the units argument,'),
+      target_high: schedule('High target, in the units argument,'),
+      note: z.string().max(2000).optional().describe('What was changed and why (shown on the Profiles page).'),
+      units,
+      timeZone,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  }, async (args) => simulate.setTestProfile(pool, args, { ...await common(args), by }));
+
   tool('get_algorithm_guide', {
     title: 'How AAPS doses',
     description: 'A guide to how the AAPS (AndroidAPS) algorithms decide: oref1 SMB, Dynamic ISF and AutoISF, the predictions (IOB, ZT, COB, UAM), eventual BG, minPredBG and minGuardBG, insulinReq, SMB sizing and limits, autosens, temp targets and profile switches, and how to read the reason text. Markdown. Also available as the resource ' + GUIDE_URI + '.',
@@ -242,7 +269,8 @@ export function createMcpRoutes (ctx) {
   router.post('/', read, express.json({ limit: '1mb' }), async (req, res, next) => {
     try {
       res.set('Cache-Control', 'no-store');
-      const server = createMcpServer(ctx);
+      const a = await ctx.auth.fromRequest(req);
+      const server = createMcpServer(ctx, { by: a.user?.email ?? a.subject?.name ?? null });
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       res.on('close', () => {
         transport.close();

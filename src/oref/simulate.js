@@ -19,6 +19,7 @@ import { MMOLL_TO_MGDL } from './format.js';
 import { ISF_CACHE_HOURS, Replayer, loadHistory, loadRuns, plannedTempDurations, tempTargetAt } from './inputs.js';
 import { sameAction } from './replay.js';
 import { DEFAULTS, POSITIVE_SETTINGS, loadSettings, validSetting } from './settings.js';
+import { TEST_PROFILE, loadTestProfile } from './testprofile.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -147,8 +148,9 @@ export async function loadProfileStore (pool, at) {
 export async function withStoredProfile (pool, changes, at) {
   const name = changes.profile?.name;
   if (!name) return changes;
-  const store = (await loadProfileStore(pool, at)).find((p) => p.name === name);
-  if (!store) throw new SimulationError(`No stored profile named ${name}`);
+  // the agents' test profile (testprofile.js) before the profile store
+  const store = name === TEST_PROFILE ? await loadTestProfile(pool) : (await loadProfileStore(pool, at)).find((p) => p.name === name);
+  if (!store) throw new SimulationError(name === TEST_PROFILE ? `There is no ${TEST_PROFILE} profile yet: an agent creates it with set_test_profile` : `No stored profile named ${name}`);
   return { ...changes, profile: { ...changes.profile, store } };
 }
 

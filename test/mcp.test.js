@@ -70,13 +70,13 @@ const call = async (name, args = {}) => {
 };
 const range = { from: new Date(t0 - HOUR).toISOString(), to: new Date(t0 + 3 * HOUR).toISOString() };
 
-test('the MCP server lists its read-only tools and the AAPS guide', async () => {
+test('the MCP server lists its tools, read-only but for the test profile, and the AAPS guide', async () => {
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((t) => t.name).sort(), [
     'get_algorithm_guide', 'get_glucose', 'get_heart_rate', 'get_loop_runs', 'get_loop_settings', 'get_misses', 'get_profile',
-    'get_profile_usage', 'get_statistics', 'get_status', 'get_treatments', 'simulate_period', 'simulate_run',
+    'get_profile_usage', 'get_statistics', 'get_status', 'get_test_profile', 'get_treatments', 'set_test_profile', 'simulate_period', 'simulate_run',
   ]);
-  assert.ok(tools.every((t) => t.annotations.readOnlyHint));
+  assert.deepEqual(tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name), ['set_test_profile']);
   const { contents: [guide] } = await client.readResource({ uri: 'loopk://docs/aaps-algorithms' });
   assert.match(guide.text, /^# How AAPS doses/);
   assert.equal((await call('get_algorithm_guide')).body, guide.text);
@@ -229,3 +229,25 @@ test('values are converted and summed as an agent reads them', () => {
 function round1 (v) {
   return Math.round(v * 10) / 10;
 }
+
+test('an agent writes the AI Test profile from a stored one, glucose in its unit', async () => {
+  assert.equal((await call('get_test_profile')).body.exists, false);
+  const { body } = await call('set_test_profile', { isf: [['00:00', 3], ['12:00', 2.5]], target_low: [['00:00', 5]], note: 'stronger ISF' });
+  assert.equal(body.basedOn, 'P');
+  assert.deepEqual(body.isfPerUnit, [['00:00', 3], ['12:00', 2.5]]);
+  // kept from P
+  assert.deepEqual(body.basalUnitsPerHour, [['00:00', 1]]);
+  assert.deepEqual(body.targetHigh, [['00:00', 6.5]]);
+  assert.equal(body.updatedBy, 'agent');
+  assert.equal(body.link, 'https://loopk.example/profiles');
+  // in mg/dL the same profile
+  const mgdl = (await call('get_test_profile', { units: 'mg/dL' })).body;
+  assert.deepEqual(mgdl.isfPerUnit[0], ['00:00', 54]);
+  // a later change keeps the rest
+  const later = (await call('set_test_profile', { dia_hours: 6 })).body;
+  assert.equal(later.diaHours, 6);
+  assert.deepEqual(later.isfPerUnit[1], ['12:00', 2.5]);
+  assert.match((await call('set_test_profile', { basal: [['06:00', 1]] })).error, /must start at 00:00/);
+  assert.match((await call('set_test_profile', { based_on: 'Nope' })).error, /No stored profile named Nope/);
+  await s.ctx.pool.query('DELETE FROM test_profiles');
+});

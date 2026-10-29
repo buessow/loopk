@@ -4,6 +4,7 @@ import { loadHistory } from './inputs.js';
 import { simulatePeriod, MAX_PERIOD } from './period.js';
 import { SimulationError, loadProfileStore, parseChanges, simulateRun } from './simulate.js';
 import { DEFAULTS, loadSettings, saveSettings, validSetting } from './settings.js';
+import { TEST_PROFILE, copyTestProfile, deleteTestProfile, fromStore, loadTestProfile, newestStore } from './testprofile.js';
 
 const READ = 'This needs a token or account that may read glucose entries, treatments and device status.';
 const HOUR = 3600000;
@@ -20,6 +21,11 @@ const HOUR = 3600000;
  *   profiles one can switch to.
  * PUT /api/simulate/settings { values, validFrom }: enters settings AAPS
  *   doesn't upload (admins).
+ * GET /api/simulate/test-profile: the "AI Test" profile agents edit
+ *   (testprofile.js) and the profiles of the newest profile store.
+ * POST /api/simulate/test-profile/copy { to }: copies it into that profile
+ *   of the store, which AAPS then receives (admins).
+ * DELETE /api/simulate/test-profile: removes it (admins).
  */
 export function createSimulateRoutes (ctx) {
   const router = express.Router();
@@ -61,8 +67,34 @@ export function createSimulateRoutes (ctx) {
     const history = await loadHistory(pool, { from: at - HOUR, to: at });
     const settings = await loadSettings(pool, { to: at, tempTargets: history.tempTargets });
     const profile = history.profiles.at(-1) || null;
-    const stored = await loadProfileStore(pool, at);
-    res.json({ at, ...settings, defaults: DEFAULTS, profile: profile && { ...profile, timeZone: undefined }, profiles: stored.map((p) => p.name) });
+    const [stored, test] = await Promise.all([loadProfileStore(pool, at), loadTestProfile(pool)]);
+    const profiles = [...(test ? [TEST_PROFILE] : []), ...stored.map((p) => p.name).filter((n) => n !== TEST_PROFILE)];
+    res.json({ at, ...settings, defaults: DEFAULTS, profile: profile && { ...profile, timeZone: undefined }, profiles });
+  }));
+
+  // stores: every profile to compare with, those of the newest profile
+  // store (which a copy can go into) with inStore, then those known only
+  // from AAPS's profile switches
+  router.get('/test-profile', ...read, h(async (req, res) => {
+    const [test, doc, known] = await Promise.all([loadTestProfile(pool), newestStore(pool), loadProfileStore(pool, Date.now())]);
+    const inStore = Object.entries(doc?.store || {}).map(([name, p]) => ({ ...fromStore(name, p), inStore: true }));
+    const others = known.filter((p) => !doc?.store?.[p.name]).map((p) => ({ ...p, inStore: false }));
+    res.json({ name: TEST_PROFILE, profile: test, stores: [...inStore, ...others], defaultProfile: doc?.defaultProfile ?? null, storeDate: doc?.date ?? null });
+  }));
+
+  const admin = auth.require(MANAGE_ACCESS, 'Only admins may change profiles.');
+  router.post('/test-profile/copy', admin, json, h(async (req, res) => {
+    const to = req.body?.to;
+    if (typeof to !== 'string' || !to) throw new SimulationError('to must name a profile of the profile store');
+    const a = await auth.fromRequest(req);
+    const utcOffset = Number.isInteger(req.body?.utcOffset) ? req.body.utcOffset : 0;
+    const doc = await copyTestProfile(ctx, { to, by: a.user?.email ?? a.subject?.name ?? null, utcOffset });
+    res.json({ copied: to, date: doc.date, identifier: doc.identifier });
+  }));
+
+  router.delete('/test-profile', admin, h(async (req, res) => {
+    await deleteTestProfile(pool);
+    res.json({ name: TEST_PROFILE, profile: null });
   }));
 
   router.put('/settings', auth.require(MANAGE_ACCESS, 'Only admins may enter loop settings.'), json, h(async (req, res) => {
