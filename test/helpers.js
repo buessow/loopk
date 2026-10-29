@@ -7,7 +7,7 @@ import { attachSockets } from '../src/sockets.js';
 const DATA_TABLES = [
   'entries', 'treatments', 'removed_treatments', 'treatment_profiles', 'treatment_profile_schedules',
   'devicestatus', 'devicestatus_predictions', 'profile', 'profile_stores', 'profile_store_schedules',
-  'food', 'settings', 'heartrate', 'subjects', 'users', 'follow_state', 'follow_config', 'prediction_models', 'glucose_predictions', 'report_dashboards', 'anthropic_config', 'sport_config',
+  'food', 'settings', 'heartrate', 'subjects', 'users', 'follow_state', 'follow_config', 'prediction_models', 'glucose_predictions', 'report_dashboards', 'anthropic_config', 'sport_config', 'loop_settings',
 ];
 
 /**

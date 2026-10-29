@@ -6,6 +6,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { startServer, tokenFor } from './helpers.js';
 import { glucose, localTime, pageLink, summarize } from '../src/mcp/data.js';
 import { linkGuide } from '../src/mcp/server.js';
+import { simulateLink, toolChanges } from '../src/mcp/simulate.js';
 import { parseView } from '../public/view.js';
 import { COLUMNS } from '../src/reports/index.js';
 
@@ -72,8 +73,8 @@ const range = { from: new Date(t0 - HOUR).toISOString(), to: new Date(t0 + 3 * H
 test('the MCP server lists its read-only tools and the AAPS guide', async () => {
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((t) => t.name).sort(), [
-    'get_algorithm_guide', 'get_glucose', 'get_heart_rate', 'get_loop_runs', 'get_misses', 'get_profile',
-    'get_profile_usage', 'get_statistics', 'get_status', 'get_treatments',
+    'get_algorithm_guide', 'get_glucose', 'get_heart_rate', 'get_loop_runs', 'get_loop_settings', 'get_misses', 'get_profile',
+    'get_profile_usage', 'get_statistics', 'get_status', 'get_treatments', 'simulate_period', 'simulate_run',
   ]);
   assert.ok(tools.every((t) => t.annotations.readOnlyHint));
   const { contents: [guide] } = await client.readResource({ uri: 'loopk://docs/aaps-algorithms' });
@@ -179,6 +180,31 @@ test('a link to a period longer than the page shows is its last 30 days, none wi
   assert.equal(pageLink('https://loopk.example', { from: to - 90 * 24 * HOUR, to, timeZone: 'Europe/Zurich' }),
     'https://loopk.example/?start=2026-09-24T09:00%2B02:00&duration=30d');
   assert.equal(pageLink('', { from: t0, to }), null);
+});
+
+test('the loop settings list their values, sources and AAPS\'s defaults', async () => {
+  const { body } = await call('get_loop_settings', { at: new Date(t0).toISOString() });
+  assert.equal(body.values.maxSMBBasalMinutes, 30);
+  assert.equal(body.sources.maxSMBBasalMinutes, 'default');
+  assert.equal(body.defaults.max_iob, body.values.max_iob);
+  assert.equal(body.at, '2026-10-24T06:00:00+02:00');
+});
+
+test('what-ifs explain what they can\'t simulate', async () => {
+  assert.match((await call('simulate_run', { time: new Date(t0 - 5 * HOUR).toISOString() })).error, /No loop run within 5 minutes/);
+  assert.match((await call('simulate_run', { time: new Date(t0).toISOString(), changes: { settings: { max_iob: true } } })).error, /max_iob must be a number/);
+  assert.match((await call('simulate_period', { from: range.from, to: new Date(t0 + 15 * 24 * HOUR).toISOString() })).error, /At most 14 days/);
+});
+
+test('what-if changes come in the agent\'s unit and link to the simulate page', () => {
+  assert.deepEqual(toolChanges({ profile: { target: 6, percentage: 90 }, tempTarget: { target: 8 } }, 'mmol/L'), {
+    profile: { percentage: 90, targetMgdl: 108 },
+    tempTarget: { targetMgdl: 144, minutes: 60 },
+  });
+  assert.deepEqual(toolChanges({ tempTarget: null, settings: { max_iob: 3 } }, 'mg/dL'), { tempTarget: null, settings: { max_iob: 3 } });
+  assert.equal(simulateLink('https://loopk.example', { run: 1000 }), 'https://loopk.example/simulate?run=1000');
+  assert.equal(simulateLink('https://loopk.example', { from: 1000, to: 2000 }), 'https://loopk.example/simulate?from=1000&to=2000');
+  assert.equal(simulateLink(null, { run: 1000 }), null);
 });
 
 test('bad arguments are tool errors the agent can read', async () => {

@@ -8,6 +8,9 @@
   --box-high: oklch(0.8 0.05 25);
   --box-ok: oklch(0.8 0.05 145);
   --box-low: oklch(0.8 0.05 255);
+  /* Carbs (brown) and insulin (light blue) on board. */
+  --chart-carbs: oklch(0.52 0.1 60);
+  --chart-insulin: oklch(0.7 0.12 235);
 }
 
 /* Night theme (Day / Night button; automatic from 21:00 to 7:00). */
@@ -26,6 +29,8 @@
   --bg-ok: oklch(0.74 0.20 145);
   --bg-low: oklch(0.72 0.19 255);
   --bg-band: oklch(0.27 0.04 145);
+  --chart-carbs: oklch(0.72 0.1 65);
+  --chart-insulin: oklch(0.82 0.09 235);
   --box-high: oklch(0.64 0.13 25);
   --box-ok: oklch(0.64 0.13 145);
   --box-low: oklch(0.64 0.13 255);
@@ -148,7 +153,7 @@
 .miss-text { flex: 1 1 24em; min-width: 0; }
 .miss-flags { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .tag.miss-low { background: color-mix(in srgb, var(--bg-low) 14%, transparent); color: var(--bg-low); }
-.miss-ask { flex: none; white-space: nowrap; }
+.miss-ask, .miss-simulate { flex: none; white-space: nowrap; }
 .miss.miss-shown { background: color-mix(in srgb, var(--color-accent) 10%, transparent); box-shadow: inset 3px 0 0 var(--color-accent); padding-left: var(--space-3); }
 .chart-empty { padding: var(--space-8); text-align: center; color: var(--color-neutral-700); }
 

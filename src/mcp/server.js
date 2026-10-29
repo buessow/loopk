@@ -13,6 +13,9 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { GUIDE } from '../analysis/prompt.js';
 import { validTimeZone } from '../reports/index.js';
 import * as data from './data.js';
+import * as simulate from './simulate.js';
+import { ALGORITHMS, SimulationError } from '../oref/simulate.js';
+import { MAX_PERIOD } from '../oref/period.js';
 
 const HOUR = 3600000;
 const DAY = 24 * HOUR;
@@ -58,7 +61,7 @@ export function createMcpServer (ctx) {
   const server = new McpServer(
     { name: 'loopk', version: '1.0.0' },
     {
-      instructions: `loopk holds one person's type 1 diabetes data: CGM glucose, the treatments their AAPS (AndroidAPS) closed loop and they logged, and the loop's device status with its algorithm's decisions. Start with get_status for the present, get_statistics for a period, get_misses for times the loop dosed wrongly, and get_loop_runs for what the algorithm computed at each run. Read get_algorithm_guide before explaining loop decisions. Glucose comes in mmol/L unless you ask for mg/dL; times are local to the person (${RANGE_NOTE} in arguments).${linkGuide(ctx.config?.publicUrl)} This is health data: it informs, it does not replace medical advice.`,
+      instructions: `loopk holds one person's type 1 diabetes data: CGM glucose, the treatments their AAPS (AndroidAPS) closed loop and they logged, and the loop's device status with its algorithm's decisions. Start with get_status for the present, get_statistics for a period, get_misses for times the loop dosed wrongly, and get_loop_runs for what the algorithm computed at each run. Read get_algorithm_guide before explaining loop decisions. For "what if" questions about settings, simulate_run decides a run again with changes (exact) and simulate_period estimates a period (with a band; mind its limits); get_loop_settings lists the settings. Glucose comes in mmol/L unless you ask for mg/dL; times are local to the person (${RANGE_NOTE} in arguments).${linkGuide(ctx.config?.publicUrl)} This is health data: it informs, it does not replace medical advice.`,
     },
   );
 
@@ -73,8 +76,9 @@ export function createMcpServer (ctx) {
       const result = await fn(args || {});
       return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }] };
     } catch (err) {
-      if (!(err instanceof ToolError)) console.error(`mcp ${name}:`, err);
-      return { isError: true, content: [{ type: 'text', text: err instanceof ToolError ? err.message : 'The tool failed; see the server log.' }] };
+      const known = err instanceof ToolError || err instanceof SimulationError;
+      if (!known) console.error(`mcp ${name}:`, err);
+      return { isError: true, content: [{ type: 'text', text: known ? err.message : 'The tool failed; see the server log.' }] };
     }
   });
 
@@ -158,6 +162,58 @@ export function createMcpServer (ctx) {
   }, async (args) => {
     const [from, to] = range(args, 3 * HOUR, args.console ? 3 * HOUR : DAY);
     return data.loopRuns(pool, { from, to, curves: !!args.curves, console: !!args.console, ...await common(args) });
+  });
+
+  const changes = z.object({
+    settings: z.record(z.string(), z.union([z.number(), z.boolean(), z.null()])).optional()
+      .describe('AAPS settings by the names get_loop_settings lists (e.g. max_iob, maxSMBBasalMinutes, maxUAMSMBBasalMinutes, SMBInterval, enableUAM, enableSMB_always, smb_delivery_ratio, iob_threshold_percent, dynIsfAdjustmentFactor); glucose values in mg/dL as AAPS keeps them.'),
+    profile: z.object({
+      name: z.string().optional().describe('Switch to this stored profile (get_profile_usage names them) instead of the one in effect, at the percentage in effect unless percentage is given.'),
+      percentage: z.number().optional().describe('Profile percentage (10-500), replacing the one in effect: basal × p, ISF and carb ratio ÷ p.'),
+      isfFactor: z.number().optional().describe('Multiplies the ISF schedule.'),
+      carbRatioFactor: z.number().optional().describe('Multiplies the carb-ratio schedule.'),
+      basalFactor: z.number().optional().describe('Multiplies the basal schedule.'),
+      target: z.number().optional().describe('The profile target all day, in the units argument.'),
+    }).optional(),
+    algorithm: z.enum(ALGORITHMS).optional().describe('Decide with another algorithm: SMB, SMB+DynISF (Dynamic ISF) or AUTO_ISF.'),
+    tempTarget: z.object({ target: z.number().describe('In the units argument.'), minutes: z.number().optional() }).nullable().optional()
+      .describe('Set a temp target from the run (or the period\'s start); null cancels the ones running or set in it.'),
+    sensitivityRatio: z.number().optional().describe('The autosens ratio to use instead of the one AAPS had (0.1-5).'),
+  }).optional().describe('What to change; leave out for the loop as it was.');
+  const SIM_METHOD = 'loopk runs its own copies of the AAPS 3.4 algorithms (oref1 SMB, Dynamic ISF, AutoISF; ported line by line) on inputs rebuilt from the uploaded data: glucose, boluses, temps, carbs (as known when entered), profile switches, temp targets, the settings at that time (get_loop_settings), and the sensitivity ratio AAPS recorded (autosens can\'t be rebuilt exactly). Unchanged, it reproduces about 97% of AutoISF and 93% of Dynamic ISF decisions exactly; reproduces says whether it did for this run.';
+
+  tool('get_loop_settings', {
+    title: 'AAPS settings at a time',
+    description: 'The AAPS loop settings in effect at a time (default now), as the simulator uses them: values by AAPS\'s internal names, where each came from (entered: by the person on loopk\'s simulate page; configuration: AAPS\'s uploaded configuration; console/reason: read from the algorithm\'s logs; default: AAPS\'s default, as AAPS uploads not all settings), and AAPS\'s defaults. Glucose values in mg/dL.',
+    inputSchema: { at: time.describe('ISO 8601 time or epoch ms (default now)'), timeZone },
+  }, async (args) => simulate.settings(pool, { at: parseTime(args.at, 'at') ?? Date.now(), ...await common(args) }));
+
+  tool('simulate_run', {
+    title: 'What if: one loop decision',
+    description: `What the loop would have decided at one of its runs with other settings, profile, algorithm, temp target or sensitivity ratio. Returns the decision AAPS recorded, loopk's copy unchanged, and with the changes: SMB (U), temp basal, eventual glucose, insulinReq (what the prediction says is missing on top of IOB), target, ISF used, IOB, COB, where the predicted curves end, the limits hit and the reason text. ${SIM_METHOD} Exact for the decision itself: use it to explain why the loop did what it did and which setting held it back. It doesn't say what glucose would have done next: use simulate_period for that. time is ISO 8601 or epoch ms; the nearest run within 5 minutes is used; link opens it on loopk's simulate page.`,
+    inputSchema: { time: z.string().describe('The loop run, ISO 8601 or epoch ms.'), changes, units, timeZone },
+  }, async (args) => {
+    const t = parseTime(args.time, 'time');
+    if (t == null) throw new ToolError('time is needed');
+    return simulate.run(pool, { time: t, changes: args.changes, ...await common(args) });
+  });
+
+  tool('simulate_period', {
+    title: 'What if: a period',
+    description: `A period (at most ${MAX_PERIOD / DAY} days; default the last 24 hours) dosed again with changes, and the glucose that would likely have followed. At each recorded loop run the algorithm decides on the simulated state; its SMBs and temp basals replace AAPS's; carbs, manual boluses, profile switches and temp targets stay as they were. ${SIM_METHOD} Simulated glucose = actual glucose − the effect of the insulin difference, each unit of difference lowering glucose by body_isf_share × the profile ISF at 100% over the insulin's action curve. The share (default 0.45, from loopk's ISF check of clean stretches) is uncertain: bandLow and bandHigh repeat at the share ∓ 0.15. The simulation restarts from reality every 6 hours, as the error grows with time. Returns time in the five ranges (% of readings: veryLow < 54, low 54-70, target 70-180, high 180-250, veryHigh > 250 mg/dL), lows below 70 and 54 and highs above 250 (episodes), minutes below 70, insulin (U: total, basal, bolus, smb, smbCount, largestSmb), for actual, simulated and the band, and the loop misses (as get_misses) gone and new. Limits: the person would have reacted differently (carbs eaten for a low the simulation avoids still count); real lows are shallower than modelled (counter-regulation, the sensor's floor); trust it for hours and modest changes, and say how wide the band is. Unchanged it should come close to actual: run it unchanged first when in doubt. ${RANGE_NOTE}; link opens it on loopk's simulate page.`,
+    inputSchema: {
+      from: time,
+      to: time,
+      changes,
+      body_isf_share: z.number().optional().describe('The body\'s share of the profile ISF at 100% (default 0.45; 0.05-3).'),
+      units,
+      timeZone,
+    },
+  }, async (args) => {
+    const [from, to] = range(args, DAY, MAX_PERIOD);
+    const k = args.body_isf_share;
+    if (k != null && !(k > 0 && k <= 3)) throw new ToolError('body_isf_share must be above 0, at most 3');
+    return simulate.period(pool, { from, to: Math.min(to, Date.now()), changes: args.changes, k, ...await common(args) });
   });
 
   tool('get_algorithm_guide', {

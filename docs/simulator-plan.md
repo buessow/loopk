@@ -13,6 +13,149 @@ The AAPS algorithms are ported to JavaScript in loopk, and their inputs are
 rebuilt from loopk's database. A replay check shows that the port decides
 as AAPS did before any what-if result is trusted.
 
+## Status (25 Oct 2026)
+
+All five phases are built. The plan below is kept as written; this section
+says where the result differs from it.
+
+**Where it lives.** One directory, `src/oref/`, instead of the planned
+`src/oref/inputs/` and `src/simulate/`:
+
+| File | What it does |
+|---|---|
+| `determinebasal.js`, `autoisf.js`, `dynisf.js`, `format.js` | The algorithms: oref1 SMB with Dynamic ISF, and AutoISF (phase 1) |
+| `glucose.js`, `iob.js`, `autosens.js`, `profile.js` | AAPS's bucketing and glucose status, IOB, COB and autosens, profiles by local time |
+| `inputs.js` | Rebuilds the inputs of a run from the database (`Replayer`) |
+| `settings.js` | The settings history: `loop_settings` (migration 0015), configuration, logs, defaults |
+| `replay.js`, `scripts/oref-replay.js` | The replay check |
+| `simulate.js` | One decision again with changes (phase 3) |
+| `period.js` | A period dosed with changes (phase 4) |
+| `routes.js` | `/api/simulate/run`, `/period` and `/settings` |
+
+The page is `/simulate` (`public/simulate.html`, `simulate.js`,
+`simulate-model.js`). A click on a loop run on the glucose page opens its
+what-if; each miss has a "Simulate" button. The page draws the glucose
+page's chart (`public/glucosechart.js`, shared with `app.js`): a period
+with the simulated glucose, band, basal, SMBs and loop decisions over the
+actual data, and a hover comparing each 5-minute step; one decision
+three hours either side of the run with the recorded and changed curves.
+A period is picked like on the glucose page (3 h to 14 d, earlier /
+later). Changes can swap in another stored profile (`profile.name`, at the
+recorded percentage unless one is given). The MCP tools are
+`simulate_run`, `simulate_period` and `get_loop_settings`
+(`src/mcp/simulate.js`).
+
+**Conformance (phase 1).** All 89 cases in `test/oref.test.js` match.
+Synthetic cases go further: `scripts/oref-cases.js` generates random loop
+runs (glucose from 39 to 400, falling and rising, stale and flat; negative
+to high IOB; carbs, temp targets, mmol/L, and random settings of the SMB,
+UAM, Dynamic ISF and AutoISF options), AAPS's own determine_basal runs them
+in a unit test (`scripts/aaps/LoopkCasesTest.kt`, at commit 423a4502f2, the
+build on the phone), and the port's results are compared field by field,
+with the four prediction curves and the reason text. Of 30,000 cases
+(10,000 per algorithm), all now match exactly. They found one difference:
+the port wrote "-0" in the reason where Java's `Math.round` gives 0.
+`test/orefsynthetic.test.js` keeps AAPS's results for 691 of them.
+
+**Replay check (phase 2)**, 30 days to 25 Oct 2026 09:00 UTC, and 30 days
+to 20 Mar 2026 (winter, Dynamic ISF only). *Runs*: loop runs replayed.
+*Same action*: % of runs where the port sets the same temp (within 0.05
+U/h) and SMB (within 0.05 U) as AAPS did. *Eventual within 5*: % of runs
+with the eventual glucose within 5 mg/dL. *IOB same* and *COB same*: % of
+runs whose rebuilt IOB and COB match AAPS's (within 0.015 U and 0.5 g).
+Higher is better in all four.
+
+| Algorithm | Period | Runs | Same action (%) | Eventual within 5 (%) | IOB same (%) | COB same (%) |
+|---|---|---|---|---|---|---|
+| AutoISF | to 25 Oct | 815 | 97.4 | 98.2 | 100.0 | 97.2 |
+| SMB + Dynamic ISF | to 25 Oct | 7,832 | 92.9 | 90.8 | 96.8 | 92.5 |
+| SMB | to 25 Oct | 3 | 100.0 | 100.0 | 100.0 | 100.0 |
+| SMB + Dynamic ISF | to 20 Mar | 8,669 | 74.8 | 79.9 | 98.3 | 93.3 |
+
+AutoISF passes the 95% goal; Dynamic ISF comes close since 25 Oct. The
+winter ran AAPS 3.3.3.0-dev-d, and most of its runs that differ have the
+same inputs and differ in the algorithm; the port follows 3.4. Four input
+bugs were found by comparing with the phone's own AAPS preferences,
+database and logs (25 Oct):
+
+- **Bucketing grid.** AAPS's calculation worker works on a copy of its
+  glucose store, and the copy drops the store's reference time
+  (`AutosensDataStoreObject.clone`). So each bucketing of irregular
+  readings anchors its 5-minute grid on the newest reading (the log says
+  "Adjusted time" = the newest reading), not on a grid set at app start.
+  loopk did the latter, fitted to the recorded glucose, which put the
+  newest bucket's minute before the run where AAPS's came after it; COB
+  and the deviation slopes behind the UAM forecast were then one step
+  ahead. Fixing it took Dynamic ISF from 87.2% to 92.9% and AutoISF from
+  96.2% to 97.4%, and an unchanged day now simulates with the actual TIR
+  and insulin.
+
+- **Local time.** AAPS reads profiles by the phone's clock, which follows
+  daylight saving and travel; the profile's time zone name (here
+  Africa/Mbabane, UTC+2 all year) doesn't. loopk now takes the clock from
+  the `utc_offset` AAPS writes on each temp basal (`PhoneClock` in
+  `profile.js`). This took AutoISF's IOB from 92.6% to 100% after the end
+  of summer time, and the winter's variable ISF from 84.8% to 97.8%.
+- **DIA.** Effective profile switches before April 2026 were uploaded with
+  a DIA of −1 ms (unset). AAPS's insulin plugin uses at least 5 hours
+  (`MIN_DIA`), and so does loopk now. Without it the winter replay had no
+  IOB and only 32.8% same action.
+- **Settings over time.** `loop_settings` entered on the page apply from
+  their time, and the replay and a period use the settings in effect at
+  each run (`loadSettingsTimeline`), not those at the end.
+
+Against the phone (AAPS database copied over adb, 25 Oct): boluses, SMBs,
+temp basals and profiles from 22 to 25 Oct match loopk's records exactly.
+The settings loopk infers match the phone's preferences except max basal
+(not binding), the carbs-required threshold (only a notification) and the
+two high-temp-target settings, which changed on 23 Oct and are entered in
+`loop_settings`. Replays with the phone's preferences
+(`scripts/oref-replay.js --settings prefs.xml`) give the same results as
+with the inferred settings.
+
+The known gaps:
+
+- **Autosens isn't rebuilt exactly.** The replay and the simulator use the
+  sensitivity ratio AAPS recorded at each run. A changed algorithm rebuilds
+  its own.
+- **The ISF AAPS uses for carbs** with Dynamic ISF and AutoISF is a 24-hour
+  average of a cache of past ISFs. AAPS clears that cache at 1,000 entries
+  and reloads only one day after a restart, which loopk can't see.
+- **Dynamic ISF's TDD ratio** differs by about 2% now and then.
+- **The AAPS version.** The port follows 3.4.2.6; runs of older versions
+  (3.3 until April 2026) match less often.
+- **Late-entered carbs** count from when AAPS knew of them: the upload time
+  when the phone was otherwise uploading promptly.
+
+**One decision (phase 3)** rebuilds the run and decides three ways:
+recorded, loopk unchanged, and changed. `reproduces` says whether loopk
+unchanged matches AAPS for that run.
+
+**A period (phase 4)** follows the design below, with these choices:
+
+- The loop decides at the recorded run times, on the simulated glucose,
+  IOB and COB.
+- Simulated glucose = actual glucose − Σ k × ISF at 100% × (insulin
+  difference − what is left of it as IOB), clipped to the sensor's 39–401
+  mg/dL. The default k is 0.45. The band repeats the simulation at k ± 0.15.
+- The simulation restarts from reality every 6 hours.
+- Misses are found again in the simulated glucose and compared with the
+  actual ones.
+
+Checked on the day to 25 Oct 09:00 UTC, unchanged, at k = 0.45. *TIR*: %
+of readings in 70–180 mg/dL, higher is better. *Mean*: mean glucose in
+mg/dL. *Insulin*: units delivered. *SMB*: units given as SMBs. In both
+rows, closer to actual is better.
+
+| | TIR (%) | Mean (mg/dL) | Insulin (U) | SMB (U) |
+|---|---|---|---|---|
+| Actual | 81.5 | 124 | 42.9 | 28.0 |
+| Simulated, unchanged | 81.5 | 124 | 42.9 | 28.4 |
+
+The ISF-for-carbs cache needs the runs of the 58 hours before a rebuild:
+34 h of readings, each averaging the 24 h before it. With only 26 h, COB
+drifted by up to 6 g and the unchanged day reached a TIR of only 74.6%.
+
 ## Starting point
 
 - **Your AAPS:** 3.4.2.6-dev, the build in `../aaps-dev` (commit
@@ -53,10 +196,11 @@ DB ──► inputs (glucose status, IOB array, meal data, autosens, TDD,
 
 - **`src/oref/`:** the port, close to the Kotlin file by file, with the same
   names, so a new AAPS release can be ported by diff.
-- **`src/oref/inputs/`:** rebuilds the inputs AAPS had, from loopk's
+- **`src/oref/inputs.js`:** rebuilds the inputs AAPS had, from loopk's
   entries, treatments and profiles.
-- **`src/simulate/`:** runs the loop forward with changed settings, with a
-  pump model (bolus step, basal rounding, SMB interval) and a body model.
+- **`src/oref/simulate.js`, `period.js`:** run the loop forward with
+  changed settings, with a pump model (bolus step, basal rounding, SMB
+  interval) and a body model.
 
 ## Phase 1: port the algorithms
 

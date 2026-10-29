@@ -277,6 +277,16 @@ export function insulinPerDay ({ start, end, basal, events }) {
 }
 
 // --- loop status ---------------------------------------------------------
+/** Insulin on board (U) reported by AAPS / Loop device-status records; it can be below 0. */
+export function iobSeries (docs) {
+  return docs
+    .map((d) => {
+      const iob = Array.isArray(d.openaps?.iob) ? d.openaps.iob[0] : d.openaps?.iob;
+      return { t: docTime(d), v: num(iob?.iob ?? d.openaps?.suggested?.IOB ?? d.openaps?.enacted?.IOB ?? d.loop?.iob?.iob) };
+    })
+    .filter((p) => p.t != null && p.v != null)
+    .sort((a, b) => a.t - b.t);
+}
 
 /** IOB / COB from the newest device status (AAPS/OpenAPS or Loop format). */
 export function onBoard (devicestatus, now = Date.now()) {
@@ -307,5 +317,5 @@ export function buildModel ({ entries, treatments, heartrate, devicestatus, pred
   const switches = [...switchesBefore, ...treatments.filter((d) => /Profile Switch$/.test(d.eventType || ''))];
   const timeline = profileTimeline(profile, switches);
   const basal = basalSegments({ start, end, timeline, temps: tempBasals(treatments) });
-  return { start, end, g, hr, forecast: forecastSeries(predictions), cobSeries: cobSeries(devicestatus), events, basal, ...onBoard(devicestatus, now) };
+  return { start, end, g, hr, forecast: forecastSeries(predictions), cobSeries: cobSeries(devicestatus), iobSeries: iobSeries(devicestatus), events, basal, ...onBoard(devicestatus, now) };
 }

@@ -1,3 +1,5 @@
+import { setupTheme } from './theme.js';
+
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -350,4 +352,5 @@ async function main () {
   await Promise.all([loadTokens(), loadUsers(), loadFollow(), loadClaude(), loadSport()]);
 }
 
+setupTheme($('themeToggle'));
 main().catch(showError);

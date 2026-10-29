@@ -7,12 +7,21 @@
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/app.css">
+<script>
+// Day / night as the device is set (or as picked since it last switched); set before drawing.
+(function () {
+  var theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+  try { var o = JSON.parse(localStorage.getItem('loopk.theme')); if (o && o.system === theme) theme = o.theme; } catch (e) {}
+  document.documentElement.dataset.theme = theme;
+})();
+</script>
 </head>
 <body>
 <div class="page">
   <nav class="nav" style="padding-inline:0">
     <span class="nav-brand">Access</span>
     <a href="/">loopk</a>
+    <button type="button" class="btn btn-secondary" id="themeToggle"></button>
   </nav>
 
   <section style="display:flex;flex-direction:column;gap:var(--space-3)">

@@ -295,6 +295,37 @@ The TDD ratio behind *Adjust sensitivity* has two flaws in this code, and both s
 
 Open question: whether these TDD-ratio issues are known upstream has not been checked; it may be worth a report to the AAPS developers.
 
+## What-if simulations in loopk
+
+loopk runs its own copies of these algorithms (AAPS 3.4.2, ported line by
+line) on inputs it rebuilds from the uploaded data. With them it answers
+"what if" questions about settings:
+
+- **One decision** (`simulate_run`, or the simulate page): the loop decides
+  again at a recorded run with changed settings, profile, algorithm, temp
+  target or sensitivity ratio. The result is exact for that decision: which
+  limit held an SMB back, and what a larger limit would have given. It
+  doesn't say what glucose would have done next.
+- **A period** (`simulate_period`): the loop doses a period again with the
+  changes. Glucose is the measured glucose minus the effect of the insulin
+  difference, at a body ISF share k of the profile ISF (default 0.45, with a
+  band at k ± 0.15). The simulation restarts from reality every 6 hours.
+
+Read the results with these limits in mind:
+
+- **Reproduction.** Unchanged, the copies reproduce about 93% of AutoISF
+  and 87% of Dynamic ISF decisions. A run with `reproduces: false`
+  compares the change against loopk's unchanged decision, not AAPS's.
+- **The person's own reactions are unchanged.** Carbs eaten for a low that
+  the simulation avoids still count.
+- **Real lows are shallower than modelled** (counter-regulation, the
+  sensor's floor).
+- **k is uncertain.** Trust results for hours and modest changes, and give
+  the band.
+- **Settings AAPS doesn't upload** (SMB minutes, max IOB and others) are
+  read from the logs or entered on the simulate page. `get_loop_settings`
+  says where each value came from.
+
 ## Sources
 
 The code was read on branch `master-3.4` of AAPS (commit 423a4502f2); the official documentation pages below were opened on 22 Oct 2026.

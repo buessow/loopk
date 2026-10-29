@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildModel, basalSegments, glucoseSeries, cobSeries, forecastSeries, profileTimeline, tempBasals, eventSeries, gmiFromMmol, insulinPerDay, onBoard, timeInRanges, trendDirection, DAY, HOUR, MIN } from '../public/model.js';
+import { buildModel, basalSegments, glucoseSeries, cobSeries, iobSeries, forecastSeries, profileTimeline, tempBasals, eventSeries, gmiFromMmol, insulinPerDay, onBoard, timeInRanges, trendDirection, DAY, HOUR, MIN } from '../public/model.js';
 
 const profile = {
   defaultProfile: 'P',
@@ -145,3 +145,14 @@ test('glucose leaves out the made-up readings of AAPS\'s Random BG source', () =
   ]);
   assert.deepEqual(g.map((p) => Math.round(p.v * 18)), [106, 124]);
 });
+
+test('IOB series reads AAPS and Loop device status, below zero too', () => {
+  assert.deepEqual(iobSeries([
+    { date: 3000, openaps: { iob: [{ iob: 1.5 }] } },
+    { date: 1000, openaps: { iob: { iob: -0.4 }, suggested: { IOB: 9 } } },
+    { date: 2000, openaps: { suggested: { IOB: 0.8 } } },
+    { date: 4000, loop: { iob: { iob: 2 } } },
+    { date: 5000, openaps: {} },
+  ]), [{ t: 1000, v: -0.4 }, { t: 2000, v: 0.8 }, { t: 3000, v: 1.5 }, { t: 4000, v: 2 }]);
+});
+

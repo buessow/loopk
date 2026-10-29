@@ -31,6 +31,16 @@ integrated from the profile and temp basals; the page adds them up
 (`public/reports-model.js`). Each person's layout is stored in
 `report_dashboards`. GridStack and Chart.js are vendored in `public/vendor/`.
 
+The simulate page (`/simulate`) shows what the AAPS loop would have done
+with other settings. It runs loopk's ports of AAPS 3.4's algorithms (SMB,
+Dynamic ISF, AutoISF; `src/oref/`, under the AGPL like AAPS) on inputs
+rebuilt from the database. It can decide one recorded loop run again, or
+dose a period again and estimate the glucose that would have followed.
+Settings AAPS doesn't upload are read from its logs or entered on the page
+(`loop_settings`). `scripts/oref-replay.js` checks how often the port
+decides as AAPS did. The method, results and limits are in
+`docs/simulator-plan.md`.
+
 During a Nightscout migration, configure `FOLLOW_URL` and `FOLLOW_TOKEN`.
 Loopk imports history from that server and listens for its live storage events,
 so it remains a read-only mirror until AAPS is switched over. A direct MongoDB
@@ -141,3 +151,12 @@ every ten seconds sends the delay since the newest glucose entry, heart-rate,
 treatment, and device-status record as StatsD gauges
 (`loopk.<collection>_sync_delay_seconds`) to Netdata on `127.0.0.1:8125`, and
 logs a line whenever one of them changes.
+
+## Licence
+
+loopk is licensed under the GNU Affero General Public License v3.0
+(`LICENSE`). `src/oref/` ports AAPS's dosing algorithms and the
+calculations behind their inputs from AndroidAPS
+(https://github.com/nightscout/AndroidAPS, AGPL-3.0); each file names the
+AAPS file and commit it follows. Under the AGPL, people who use loopk over a
+network must be able to get its source.
