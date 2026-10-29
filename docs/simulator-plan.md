@@ -362,8 +362,8 @@ how much.
   - a "Simulate" link from each miss.
 - **MCP:** a `simulate_period` tool with the same changes, and the
   description of the method and its limits in the tool description.
-- Add the simulator to `docs/aaps-algorithms.md`, so Claude reviews can
-  suggest settings and check them.
+- Add the simulator to `docs/aaps-algorithms.md`, so agents reviewing the
+  loop can suggest settings and check them.
 
 ## Order and sizes
 

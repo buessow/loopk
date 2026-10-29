@@ -71,16 +71,6 @@
       <table class="table"><thead><tr><th>Data</th><th>Copied up to</th></tr></thead><tbody id="followTable"></tbody></table>
     </div>
   </section>
-  <section style="display:flex;flex-direction:column;gap:var(--space-3)" id="claudeSection">
-    <h3 style="margin:0">Claude reviews</h3>
-    <p class="text-muted" style="margin:0">With an Anthropic API key, “Ask Claude” on the glucose page has Claude judge what the loop did in a selected period. Each review sends that period’s readings, treatments and loop status to Anthropic and costs API credit, roughly $0.25–0.60 a review. Create a key in the <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Anthropic Console</a> (API keys → Create key) and enter it here; it is checked with Anthropic before it is saved.</p>
-    <div id="claudeStatus"></div>
-    <form class="row" id="claudeForm">
-      <div class="field"><label for="claudeKey">Anthropic API key</label><input class="input mono" id="claudeKey" type="password" autocomplete="off" spellcheck="false" required placeholder="sk-ant-api03-…"></div>
-      <button class="btn btn-primary" type="submit" id="claudeSave">Check and save</button>
-      <button class="btn btn-ghost" type="button" id="claudeRemove" hidden>Remove</button>
-    </form>
-  </section>
   <section style="display:flex;flex-direction:column;gap:var(--space-3)" id="sportSection">
     <h3 style="margin:0">Sport mode</h3>
     <p class="text-muted" style="margin:0">Adds a Sport button to the glucose page. Switching it on writes a Profile Switch to a percentage of the profile and an Activity temp target; switching it off goes back to the profile from before and ends the temp target. The duration is chosen when switching it on; with no limit it stays on until it is switched off (AAPS has no temp target without an end, so the temp target is then sent for 24 hours). AAPS applies them only with “Receive profile switches” and “Receive temporary targets” on in its NSClient settings: check on the phone that they arrived. A percentage below 100 lowers basal and makes ISF and carb ratio weaker by the same factor, so carbs are still counted right. Only admins can switch it.</p>

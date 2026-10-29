@@ -10,7 +10,7 @@ import express from 'express';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { GUIDE } from '../analysis/prompt.js';
+import { GUIDE } from '../analysis/guide.js';
 import { validTimeZone } from '../reports/index.js';
 import * as data from './data.js';
 import * as simulate from './simulate.js';

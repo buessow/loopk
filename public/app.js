@@ -1,8 +1,7 @@
 import { buildModel, docTime, glucoseSeries, gmiFromMmol, insulinPerDay, timeInRanges, trendDirection, MIN, HOUR, DAY, MGDL_PER_MMOL } from './model.js';
 import { setupTheme } from './theme.js';
-import { HI, LO, MARK_COLOR, MARK_LABEL, chartSvg, dayHm, esc, f1, geometry as chartGeometry, hm, hoverSvg } from './glucosechart.js';
-import { renderMarkdown } from './markdown.js';
-import { extractAnnotations } from './annotations.js';
+import { HI, LO, chartSvg, dayHm, esc, f1, geometry as chartGeometry, hm, hoverSvg } from './glucosechart.js';
+import { claudeLink, claudePrompt } from './askclaude.js';
 import { loopRuns } from './loopruns.js';
 import { DEVICESTATUS_FIELDS, PAGE, TREATMENT_FIELDS, api, fetchRange, fetchSwitchBefore } from './documents.js';
 import { missNote, missSelection, missSummary } from './misses.js';
@@ -25,7 +24,7 @@ const RECENT = 30 * HOUR;
 // This lets the chart pan through the full history without retaining it all.
 const CACHE_MARGIN = 30 * 24 * HOUR;
 
-// The longest period Claude reviews (src/analysis/context.js, MAX_WINDOW).
+// The longest period to ask Claude about (misses.js has the same).
 const MAX_SELECTION = 12 * HOUR;
 const MIN_SELECTION = 10 * MIN;
 // Periods the loop's misses can be listed for, in days.
@@ -53,14 +52,13 @@ const state = {
   hoverT: null,
   drag: null,
   selecting: false, // "Select time range" is on: a drag selects instead of panning
-  selection: null, // { from, to } (ms) for Claude to review
+  selection: null, // { from, to } (ms) to ask Claude about
   selDrag: null,
-  annotations: [], // Claude's marks on the chart: [{ n, from, to, kind, text }]
   misses: null, // the loop's misses (misses.js) in the last missDays, newest first
   missDays: stored('missDays', (v) => MISS_DAYS.includes(+v), 30, Number),
   missKind: 'all',
   missShown: null, // start of the miss shown on the chart
-  canReview: false, // the session may ask Claude
+  missCopied: null, // { start, ok }: the miss whose AI prompt was just copied
   gesture: false, // a wheel pan is going on: the address is written when it ends
 };
 
@@ -589,7 +587,7 @@ function chartOptions () {
   return {
     data: state.data, W: state.W, t0, t1, units: unit(), style: state.style,
     showProfile: state.showProfile, showForecast: state.showForecast, showLoop: state.showLoop,
-    withDay: state.hours > 24 || state.offset > 0, runLink: true, annotations: state.annotations, drag: state.drag,
+    withDay: state.hours > 24 || state.offset > 0, runLink: true, drag: state.drag,
   };
 }
 
@@ -598,30 +596,7 @@ const geometry = () => chartGeometry(chartOptions());
 function renderChart () {
   $('chartWrap').innerHTML = chartSvg(chartOptions());
   renderSelection();
-  renderAnnotations();
   renderHover();
-}
-
-/** Claude's marks: a dashed line and a numbered badge at each time, a band over each period. */
-function renderAnnotations () {
-  const g = $('ann');
-  if (!g) return;
-  const { X, Ln, axis, padL, plotR, t0, t1 } = geometry();
-  let lastX = -Infinity;
-  let row = 0;
-  g.innerHTML = state.annotations.filter((a) => a.to >= t0 && a.from <= t1).map((a) => {
-    const c = MARK_COLOR[a.kind];
-    const x0 = Math.max(padL, X(a.from));
-    const x1 = Math.min(plotR, X(a.to));
-    // Badges close together stack downwards.
-    row = x0 - lastX < 22 ? row + 1 : 0;
-    lastX = x0;
-    const y = Ln.gT + 14 + row * 22;
-    return (x1 > x0 ? `<rect x="${f1(x0)}" y="${Ln.gT}" width="${f1(x1 - x0)}" height="${Ln.gH}" style="fill:color-mix(in srgb,${c} 12%,transparent)"></rect>` : '')
-      + `<line x1="${f1(x0)}" x2="${f1(x0)}" y1="${Ln.bT}" y2="${axis}" style="stroke:${c};stroke-width:1.25;stroke-dasharray:4 3"></line>`
-      + `<circle cx="${f1(x0)}" cy="${y}" r="9" style="fill:${c};stroke:var(--color-bg);stroke-width:1.5"></circle>`
-      + `<text x="${f1(x0)}" y="${y + 4}" style="fill:var(--color-bg);font-family:var(--font-body);font-size:11px;font-weight:600;text-anchor:middle">${a.n}</text>`;
-  }).join('');
 }
 
 /** The period selected for Claude: a shaded band with an edge at each end in view. */
@@ -680,9 +655,7 @@ function render () {
   renderMisses();
 }
 
-// --- review by Claude ---------------------------------------------------
-
-let reviewing = null; // AbortController of the review being streamed
+// --- a prompt for Claude ---------------------------------------------------
 
 /** "Thu 22 · 14:05 – 17:30 · 3 h 25 min" */
 function selectionLabel ({ from, to }) {
@@ -699,163 +672,60 @@ function showAnalysis () {
   panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
+/** The panel for the selection: its label, buttons and the prompt (askclaude.js). */
 function updateAnalysis () {
   const s = state.selection;
   $('analysisRange').textContent = s ? selectionLabel(s) : 'No period selected';
-  $('analysisRun').disabled = !s && !reviewing;
-  $('analysisRun').textContent = reviewing ? 'Stop' : review.conversation.length ? 'New review' : 'Review with Claude';
-  $('analysisAskButton').disabled = !!reviewing;
   $('analysisSelect').setAttribute('aria-pressed', String(state.selecting));
   $('analysisSelect').textContent = state.selecting ? 'Drag across the chart…' : s ? 'Select another time range' : 'Select time range';
-  $('analysisClear').hidden = !s && !review.conversation.length;
+  $('analysisClear').hidden = !s;
   $('chartWrap').classList.toggle('selecting', state.selecting);
+  const prompt = s ? claudePrompt({ from: Math.round(s.from), to: Math.round(s.to), note: $('analysisNote').value, units: unit(), origin: location.origin }) : '';
+  $('analysisPromptField').hidden = !s;
+  $('analysisPrompt').value = prompt;
+  $('analysisCopy').disabled = !s;
+  const link = s && claudeLink(prompt);
+  const open = $('analysisOpen');
+  if (link) open.href = link;
+  else open.removeAttribute('href');
+  open.setAttribute('aria-disabled', String(!link));
+  open.title = s && !link ? 'The prompt is too long for a link: copy it instead' : '';
+  $('analysisStatus').textContent = '';
 }
 
-// The review being discussed: the first request ({ from, to, tz, question })
-// and the answers and follow-up questions since ([{ role, text }]).
-const review = { request: null, conversation: [] };
-
-/** The answers and questions so far; the annotations blocks are on the chart instead. */
-function renderThread () {
-  const near = review.request?.from ?? Date.now();
-  $('analysisResult').innerHTML = review.conversation.map((turn) => (turn.role === 'user'
-    ? `<div class="analysis-question">${esc(turn.text)}</div>`
-    : `<div class="analysis-answer">${renderMarkdown(extractAnnotations(turn.text, near).markdown)}</div>`)).join('');
-  $('analysisFollow').hidden = !review.conversation.some((turn) => turn.role === 'assistant');
-}
-
-/**
- * Asks Claude: the first review of the selection (no question) or a
- * follow-up question about it. Streams the answer into the thread; while
- * it runs, "Review with Claude" stops it.
- */
-async function askClaude (question = null) {
-  if (reviewing) return;
-  if (question == null) {
-    const s = state.selection;
-    if (!s) return;
-    review.request = { from: Math.round(s.from), to: Math.round(s.to), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, units: unit(), question: $('analysisNote').value };
-    review.conversation = [];
-    setAnnotations([]);
-  } else {
-    review.conversation.push({ role: 'user', text: question });
-  }
-  const sent = review.conversation.length ? [...review.conversation] : undefined;
-  const answer = { role: 'assistant', text: '' };
-  review.conversation.push(answer);
-  const ctl = new AbortController();
-  reviewing = ctl;
+/** Copies the prompt; true if it worked, else it is selected in the box to copy by hand. */
+async function copyPrompt () {
   const status = (text) => { $('analysisStatus').textContent = text; };
-  status(question == null ? 'Claude is reading the records… a review takes a minute or two.' : 'Claude is thinking…');
-  renderThread();
-  updateAnalysis();
   try {
-    const res = await fetch('/api/analysis', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...review.request, conversation: sent }),
-      signal: ctl.signal,
-    });
-    if (res.status === 401) {
-      location.href = '/login';
-      return;
-    }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.message || body.description || `error ${res.status}`);
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      answer.text += decoder.decode(value, { stream: true });
-      // A follow-up only replaces the marks when it lists them again.
-      const { annotations } = extractAnnotations(answer.text, review.request.from);
-      if (annotations.length && annotations.length !== state.annotations.length) {
-        setAnnotations(annotations);
-        // Show the reviewed period and everything Claude marked.
-        zoomTo(Math.min(review.request.from, ...annotations.map((a) => a.from)), Math.max(review.request.to, ...annotations.map((a) => a.to)));
-      }
-      renderThread();
-      status('Claude is writing…');
-    }
-    status(`About ${selectionLabel(review.request)}. Claude can be wrong: check it against the chart.`);
-  } catch (err) {
-    status(ctl.signal.aborted ? 'Stopped.' : `No answer: ${err.message}`);
-  } finally {
-    // Without an answer, the question goes back into the box to ask again.
-    if (!answer.text.trim()) {
-      review.conversation.pop();
-      if (question != null) {
-        review.conversation.pop();
-        if (!$('analysisAsk').value) $('analysisAsk').value = question;
-      }
-    }
-    reviewing = null;
-    renderThread();
-    updateAnalysis();
+    await navigator.clipboard.writeText($('analysisPrompt').value);
+    status('Copied: paste it into Claude (or another agent) with the loopk connector on.');
+    return true;
+  } catch {
+    $('analysisPrompt').select();
+    status('Select all and copy it from the box.');
+    return false;
   }
-}
-
-/** Shows Claude's marks on the chart and lists them in the panel. */
-function setAnnotations (annotations) {
-  state.annotations = annotations;
-  renderAnnotations();
-  $('analysisMarks').innerHTML = annotations.map((a) => `<li><button type="button" class="analysis-mark" data-mark="${a.n}">`
-    + `<span class="analysis-mark-n" style="background:${MARK_COLOR[a.kind]}">${a.n}</span>`
-    + `<span class="analysis-mark-time">${hm(a.from)}${a.to > a.from ? '–' + hm(a.to) : ''}</span>`
-    + `<b style="color:${MARK_COLOR[a.kind]}">${MARK_LABEL[a.kind]}</b> <span>${esc(a.text)}</span></button></li>`).join('');
 }
 
 function wireAnalysis () {
-  // A mark in the list zooms the chart to it.
-  $('analysisMarks').addEventListener('click', (e) => {
-    const a = state.annotations.find((x) => String(x.n) === e.target.closest('[data-mark]')?.dataset.mark);
-    if (!a) return;
-    // The mark with an hour either side.
-    zoomTo(a.from - HOUR, a.to + HOUR);
-    $('chartWrap').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  });
   $('analysisSelect').addEventListener('click', () => {
     state.selecting = !state.selecting;
     if (state.selecting) $('chartWrap').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     updateAnalysis();
   });
   $('analysisClear').addEventListener('click', () => {
-    reviewing?.abort();
     state.missShown = null;
     renderMisses();
     state.selecting = false;
     state.selection = null;
-    review.request = null;
-    review.conversation = [];
-    renderThread();
-    setAnnotations([]);
+    $('analysisNote').value = '';
     renderSelection();
     updateAnalysis();
   });
+  $('analysisNote').addEventListener('input', updateAnalysis);
+  $('analysisCopy').addEventListener('click', copyPrompt);
   rememberOpen('analysis', 'claudeOpen');
   updateAnalysis();
-  $('analysisRun').addEventListener('click', () => (reviewing ? reviewing.abort() : askClaude()));
-  // Follow-up questions; Enter sends, shift + Enter starts a new line.
-  const follow = () => {
-    const q = $('analysisAsk').value.trim();
-    if (!q || reviewing) return;
-    $('analysisAsk').value = '';
-    askClaude(q);
-  };
-  $('analysisFollow').addEventListener('submit', (e) => {
-    e.preventDefault();
-    follow();
-  });
-  $('analysisAsk').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      follow();
-    }
-  });
 }
 
 /** Opens the section `id` as it was left, and remembers it under `key`. */
@@ -901,7 +771,7 @@ function renderMisses () {
     + (m.flags.length ? `<span class="miss-flags">${m.flags.map((f) => `<span class="tag">${esc(f)}</span>`).join('')}</span>` : '')
     + '</button>'
     + `<a class="btn btn-secondary miss-simulate" href="/simulate?${missSimulation(m)}" title="Dose this stretch again with other settings">Simulate</a>`
-    + (state.canReview ? '<button type="button" class="btn btn-secondary miss-ask">Ask Claude</button>' : '')
+    + `<button type="button" class="btn btn-secondary miss-ask" title="Copy a prompt about it for Claude or another agent with loopk's MCP connector">${state.missCopied?.start === m.start ? (state.missCopied.ok ? 'Copied' : 'Not copied') : 'AI Prompt'}</button>`
     + '</li>').join('');
 }
 
@@ -946,10 +816,19 @@ function wireMisses () {
     if (!m || e.target.closest('.miss-simulate')) return;
     showMiss(m);
     if (e.target.closest('.miss-ask')) {
-      if (reviewing) return;
+      // Copies at once (in the click, as the clipboard requires) and shows the prompt.
       $('analysisNote').value = missNote(m, missGlucose);
+      updateAnalysis();
+      copyPrompt().then((ok) => {
+        state.missCopied = { start: m.start, ok };
+        renderMisses();
+        setTimeout(() => {
+          if (state.missCopied?.start !== m.start) return;
+          state.missCopied = null;
+          renderMisses();
+        }, 2000);
+      });
       showAnalysis();
-      askClaude();
     } else {
       $('chartWrap').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
@@ -972,7 +851,7 @@ function wireChart () {
   wrap.addEventListener('pointerdown', (e) => {
     if (!isHit(e) || e.button !== 0) return;
     e.preventDefault();
-    // "Ask Claude" on, or shift held: the drag selects a period.
+    // "Select time range" on, or shift held: the drag selects a period.
     if (state.selecting || e.shiftKey) {
       const t = Math.min(Date.now(), timeAt(e));
       state.selDrag = { id: e.pointerId, t };
@@ -1230,9 +1109,6 @@ async function main () {
   const session = await res.json();
   await useCacheFor(session.user.email).catch(() => {});
   $('adminLink').hidden = !session.isAdmin;
-  // Reviews need an Anthropic API key (Access page).
-  $('analysis').hidden = !session.claude;
-  state.canReview = !!session.claude;
   // Sport mode, once an admin set it up (Access page).
   if (session.sport) loadSport().catch(console.error);
   $('signOut').addEventListener('click', async () => {

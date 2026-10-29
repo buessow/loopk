@@ -127,29 +127,27 @@
     <span class="analysis-status" id="missesStatus" role="status"></span>
     <ol class="misses-list" id="missesList"></ol>
   </details>
-  <details class="analysis blueprint" id="analysis" hidden><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+  <details class="analysis blueprint" id="analysis"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
     <summary class="analysis-head">
-      <h4>Ask Claude</h4>
+      <h4>AI Prompt</h4>
       <span class="tag tag-accent" id="analysisRange">No period selected</span>
     </summary>
     <div class="analysis-tools">
       <button type="button" class="btn btn-secondary" id="analysisSelect" aria-pressed="false">Select time range</button>
       <button type="button" class="btn btn-ghost" id="analysisClear">Clear</button>
     </div>
-    <p class="analysis-hint">Press "Select time range", then drag across the chart to select up to 12 hours (with a mouse, shift-drag selects at any time). Claude gets the readings, treatments and loop runs from 6 hours before to 3 hours after the selection, the profile, and a guide to how AAPS doses, and judges whether the loop over- or under-corrected, and why.</p>
-    <label class="analysis-note">Anything Claude should know (optional)
+    <p class="analysis-hint">Press "Select time range", then drag across the chart to select up to 12 hours (with a mouse, shift-drag selects at any time). This drafts a prompt for Claude (or another AI agent) with the period and your question; the agent then reads the readings, treatments, loop runs and profile itself through loopk's MCP connector, and can simulate other settings. Add the connector to the agent first: an admin creates it on the Access page, under "Agents (MCP)". Nothing is sent from this page.</p>
+    <label class="analysis-note">Your question, or what Claude should know (optional)
       <textarea class="input" id="analysisNote" rows="2" maxlength="2000" placeholder="For example: pizza at 19:00, carbs not logged; cycled 18:00–19:00"></textarea>
     </label>
+    <label class="analysis-note" id="analysisPromptField" hidden>Prompt
+      <textarea class="input mono" id="analysisPrompt" rows="9" readonly></textarea>
+    </label>
     <div class="analysis-actions">
-      <button type="button" class="btn btn-primary" id="analysisRun" disabled>Review with Claude</button>
+      <button type="button" class="btn btn-primary" id="analysisCopy" disabled>Copy prompt</button>
+      <a class="btn btn-secondary" id="analysisOpen" target="_blank" rel="noopener" aria-disabled="true">Open in Claude</a>
       <span class="analysis-status" id="analysisStatus" role="status"></span>
     </div>
-    <ol class="analysis-marks" id="analysisMarks" aria-label="Marks on the chart"></ol>
-    <div class="analysis-result" id="analysisResult" aria-live="polite"></div>
-    <form class="analysis-follow" id="analysisFollow" hidden>
-      <textarea class="input" id="analysisAsk" rows="2" maxlength="2000" aria-label="Follow-up question" placeholder="Ask a follow-up, e.g. why was there no SMB at (2)? Enter sends."></textarea>
-      <button type="submit" class="btn btn-primary" id="analysisAskButton">Ask</button>
-    </form>
   </details>
 
 

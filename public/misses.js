@@ -4,7 +4,7 @@
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
-// The longest period Claude reviews (src/analysis/context.js, MAX_WINDOW).
+// The longest period to ask Claude about (app.js has the same).
 const MAX_SELECTION = 12 * HOUR;
 
 const units = (u) => `${Number(u.toFixed(2))} U`;
@@ -67,7 +67,7 @@ export function missSelection (m) {
   return { from, to: Math.min(m.end + 30 * MIN, from + MAX_SELECTION) };
 }
 
-/** What Claude is told about the miss with the review. */
+/** What the prompt for Claude says about the miss (askclaude.js). */
 export function missNote (m, glucose) {
   const flags = m.flags.length ? ` (${m.flags.join(', ')})` : '';
   return `loopk flagged this as a loop miss${flags}: ${missSummary(m, glucose)} Explain why the loop did this and what would have prevented it.`;

@@ -70,8 +70,6 @@ export function createSessionRoutes (ctx) {
       user: { email: a.user.email, name: a.user.name, picture: a.user.picture },
       isAdmin: auth.can(a, MANAGE_ACCESS),
       follow: ctx.follower ? ctx.follower.status : null,
-      // Whether "Ask Claude" works: an Anthropic API key is set.
-      claude: !!ctx.reviewer?.available,
       // Whether the Sport button shows: an admin set sport mode up.
       sport: !!ctx.sport?.configured,
       permissions: a.permissions,
@@ -129,26 +127,6 @@ export function createSessionRoutes (ctx) {
   router.delete('/api/admin/follow', admin, h(async (req, res) => {
     await ctx.following.remove();
     res.json(await ctx.following.view());
-  }));
-
-  // --- the Anthropic API key for Claude's reviews, for admins ------------
-
-  router.get('/api/admin/claude', admin, (req, res) => res.json(ctx.reviewer.view()));
-  // { apiKey }: checks the key with Anthropic and saves it.
-  router.put('/api/admin/claude', admin, h(async (req, res) => {
-    const { apiKey } = req.body || {};
-    if (typeof apiKey !== 'string') return res.status(400).json({ status: 400, message: 'Enter an Anthropic API key' });
-    const by = (await auth.fromRequest(req)).user?.email;
-    try {
-      await ctx.reviewer.configure(apiKey, by);
-    } catch (err) {
-      return res.status(400).json({ status: 400, message: err.message });
-    }
-    res.json(ctx.reviewer.view());
-  }));
-  router.delete('/api/admin/claude', admin, h(async (req, res) => {
-    await ctx.reviewer.remove();
-    res.json(ctx.reviewer.view());
   }));
 
   return router;

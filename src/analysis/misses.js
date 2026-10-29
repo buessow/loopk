@@ -7,7 +7,7 @@
 // Glucose, targets and ISF are in mg/dL as AAPS reports them.
 
 import { VALID_SGV } from '../predict/index.js';
-import { uniqueRuns } from './prompt.js';
+import { uniqueRuns } from './guide.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;

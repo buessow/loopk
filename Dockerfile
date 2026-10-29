@@ -17,7 +17,7 @@ COPY --chown=node:node package.json ./
 COPY --chown=node:node src ./src
 COPY --chown=node:node scripts ./scripts
 COPY --chown=node:node public ./public
-# The AAPS guide that Claude's reviews send along (src/analysis/prompt.js).
+# The AAPS guide the MCP tool get_algorithm_guide sends (src/analysis/guide.js).
 COPY --chown=node:node docs ./docs
 COPY --chown=node:node migrations ./migrations
 COPY --chown=node:node setup-databases.sh ./

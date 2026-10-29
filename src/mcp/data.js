@@ -7,7 +7,7 @@ import { VALID_SGV, predict, recentRecords, zoneOffset } from '../predict/index.
 import { hourlyTotals, COLUMNS } from '../reports/index.js';
 import { profileUsage } from '../reports/profiles.js';
 import { profileAt } from '../analysis/context.js';
-import { algorithmPeriods, uniqueRuns } from '../analysis/prompt.js';
+import { algorithmPeriods, uniqueRuns } from '../analysis/guide.js';
 import { findMisses, reasonPredictions, runLimits } from '../analysis/misses.js';
 import { limitText, missSummary } from '../../public/misses.js';
 import { gmiFromMmol } from '../../public/model.js';

@@ -238,54 +238,6 @@ $('followRemove').addEventListener('click', async () => {
   } catch (err) { showError(err); }
 });
 
-// --- the Anthropic API key for Claude's reviews -----------------------------
-
-let claude = null;
-
-function renderClaude () {
-  const c = claude;
-  let html = c.keySet
-    ? `<span class="tag tag-accent">On</span> Reviews use the key ending <span class="mono">…${esc(c.keyEnd)}</span> with <span class="mono">${esc(c.model)}</span>.`
-    : '<span class="tag tag-neutral">Off</span> No key: “Ask Claude” is unavailable.';
-  if (c.source === 'environment') html += '<br><span class="text-muted">Set by ANTHROPIC_API_KEY on the server; saving here replaces it.</span>';
-  else if (c.updatedBy) html += `<br><span class="text-muted">Set by ${esc(c.updatedBy)} ${since(c.updatedAt)}.</span>`;
-  $('claudeStatus').innerHTML = html;
-  $('claudeSave').textContent = c.source === 'settings' ? 'Check and replace' : 'Check and save';
-  $('claudeRemove').hidden = c.source !== 'settings';
-}
-
-async function loadClaude () {
-  claude = await call('GET', '/api/admin/claude');
-  renderClaude();
-}
-
-$('claudeForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  $('error').hidden = true;
-  const btn = $('claudeSave');
-  const label = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Checking…';
-  try {
-    claude = await call('PUT', '/api/admin/claude', { apiKey: $('claudeKey').value });
-    $('claudeKey').value = '';
-    renderClaude();
-  } catch (err) {
-    btn.textContent = label;
-    showError(err);
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-$('claudeRemove').addEventListener('click', async () => {
-  if (!confirm('Remove the Anthropic API key from this server? “Ask Claude” stops working until a key is set again.')) return;
-  try {
-    claude = await call('DELETE', '/api/admin/claude');
-    renderClaude();
-  } catch (err) { showError(err); }
-});
-
 // --- sport mode ---------------------------------------------------------------
 
 const MGDL_PER_MMOL = 18.0182;
@@ -349,7 +301,7 @@ async function main () {
     document.querySelectorAll('section').forEach((s) => { s.hidden = true; });
     throw new Error('Only admins can manage access.');
   }
-  await Promise.all([loadTokens(), loadUsers(), loadFollow(), loadClaude(), loadSport()]);
+  await Promise.all([loadTokens(), loadUsers(), loadFollow(), loadSport()]);
 }
 
 setupTheme($('themeToggle'));

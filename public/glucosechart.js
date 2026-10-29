@@ -11,7 +11,6 @@
 //   showProfile, showForecast, showLoop   the overlays
 //   withDay      the hover names the day
 //   runLink      the hover offers a click to simulate a loop run
-//   annotations  Claude's marks, for the hover
 //   sim          { g: [{ t, v }], band: [{ t, lo, hi }], basal: [{ t0, t1, rate }],
 //                  smbs: [{ t, v }], runs (as loopruns.js), windows: [t] }
 //                glucose in mmol/L, as in `data`
@@ -458,17 +457,12 @@ export function chartSvg (o) {
     push(`<text x="0" y="0" transform="translate(${W - 10} ${y}) rotate(90)" style="text-anchor:middle;font-family:var(--font-body);font-size:10px;letter-spacing:0.08em;fill:var(--color-accent-700)">${esc(s)}</text>`);
   }
 
-  push('<g id="ann"></g>');
   push('<g id="sel"></g>');
   push('<g id="hov"></g>');
   push(`<rect class="hit${o.drag ? ' dragging' : ''}" id="hit" x="${padL}" y="0" width="${iw}" height="${H}"></rect>`);
 
   return `<svg width="${W}" height="${H}" role="img" aria-label="Glucose, basal, events and heart rate">${out.join('')}</svg>`;
 }
-
-// Claude's marks: blue where it found too much insulin (heading low), red too little.
-export const MARK_COLOR = { over: 'var(--bg-low)', under: 'var(--bg-high)', ok: 'var(--bg-ok)', note: 'var(--color-neutral-700)' };
-export const MARK_LABEL = { over: 'Too much', under: 'Too little', ok: 'Good', note: 'Note' };
 
 /**
  * The hover layer at time `t`: the values there and, with the loop shown,
@@ -490,11 +484,10 @@ export function hoverSvg (o, t0hover) {
   const predicted = o.showForecast
     ? FORECAST_LINES.map(([m]) => [m, nearest((D.forecast[m] || []).filter((q) => Math.abs(q.t - t) <= 5 * MIN), t, 5 * MIN)])
     : [];
-  const marks = (o.annotations || []).filter((a) => t >= a.from - 5 * MIN * k && t <= a.to + 5 * MIN * k);
   // The loop run nearest the pointer, with what it predicted.
   const run = o.showLoop ? nearest(D.loop.filter((r) => Math.abs(r.t - t) <= Math.max(6, 5 * k) * MIN), t, Math.max(6, 5 * k) * MIN) : null;
-  // Wider with the loop, the prediction rows or Claude's marks, so their labels fit.
-  const boxW = run ? 300 : marks.length ? 260 : predicted.length ? 216 : 180;
+  // Wider with the loop or the prediction rows, so their labels fit.
+  const boxW = run ? 300 : predicted.length ? 216 : 180;
   // With a loop run, on the left: its predicted curves run to the right.
   const onLeft = run ? x > boxW + 40 : x > W - boxW - 40;
   const left = Math.round(onLeft ? x - boxW - 14 : x + 14);
@@ -504,7 +497,7 @@ export function hoverSvg (o, t0hover) {
     + (h ? `<circle cx="${f1(x)}" cy="${f1(HY(h.v))}" r="4" style="fill:none;stroke:var(--color-text);stroke-width:1.5"></circle>` : '')
     + (run ? loopCurves(run, geo) : '')
     // With a loop run the window is long: it starts at the top of the chart.
-    + `<foreignObject x="${left}" y="${run ? Ln.bT : Ln.gT}" width="${boxW + 16}" height="${140 + 20 * predicted.length + 40 * marks.length + (run ? 300 : 0)}" style="pointer-events:none"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${boxW}px;margin:4px;background:var(--color-bg);border:1px solid var(--color-text);box-shadow:var(--shadow-md);padding:var(--space-2) var(--space-3);display:grid;grid-template-columns:1fr auto;gap:2px var(--space-3);font-size:12px">`
+    + `<foreignObject x="${left}" y="${run ? Ln.bT : Ln.gT}" width="${boxW + 16}" height="${140 + 20 * predicted.length + (run ? 300 : 0)}" style="pointer-events:none"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${boxW}px;margin:4px;background:var(--color-bg);border:1px solid var(--color-text);box-shadow:var(--shadow-md);padding:var(--space-2) var(--space-3);display:grid;grid-template-columns:1fr auto;gap:2px var(--space-3);font-size:12px">`
     + `<div style="grid-column:span 2;font-family:var(--font-heading);font-weight:600;font-size:15px">${time}</div>`
     + `<span style="color:var(--color-neutral-700)">Glucose</span><span>${p ? fmt(p.v) + ' ' + o.units : '–'}</span>`
     + predicted.map(([m, q]) => `<span style="color:var(--color-neutral-700)">Predicted ${m} min ago</span><span>${q ? fmt(q.v) : '–'}</span>`).join('')
@@ -514,7 +507,6 @@ export function hoverSvg (o, t0hover) {
     + `<span style="color:var(--color-neutral-700)">COB</span><span>${cob ? Math.round(cob.v) + ' g' : '–'}</span>`
     + `<span style="color:var(--color-neutral-700)">Heart rate</span><span>${h ? h.v + ' bpm' : '–'}</span>`
     + (run ? loopRows(o, run) : '')
-    + marks.map((a) => `<span style="grid-column:span 2;border-top:1px solid var(--color-divider);padding-top:2px"><b style="color:${MARK_COLOR[a.kind]}">(${a.n}) ${MARK_LABEL[a.kind]}</b> ${esc(a.text)}</span>`).join('')
     + '</div></foreignObject>';
   return { html, run };
 }

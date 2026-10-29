@@ -13,7 +13,6 @@ import { ModelStore } from './predict/store.js';
 import { PredictionRecorder } from './predict/recorder.js';
 import { createReportRoutes } from './reports/routes.js';
 import { createAnalysisRoutes } from './analysis/routes.js';
-import { ClaudeReviewer } from './analysis/claude.js';
 import { SportMode } from './sport/mode.js';
 import { createSportRoutes } from './sport/routes.js';
 import { createMcpRoutes } from './mcp/server.js';
@@ -36,9 +35,6 @@ export async function createContext (config, pool) {
   // The server starts the recorder, which predicts for each new reading.
   ctx.models = new ModelStore(pool);
   ctx.predictions = new PredictionRecorder(ctx, ctx.models);
-  // Reviews of the loop by Claude, with the key an admin set (or ANTHROPIC_API_KEY).
-  ctx.reviewer = new ClaudeReviewer(pool, config.anthropic);
-  await ctx.reviewer.load();
   // Sport mode: a profile percentage and temp target sent to AAPS.
   ctx.sport = new SportMode(ctx);
   await ctx.sport.load();
