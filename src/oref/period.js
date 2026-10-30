@@ -221,21 +221,21 @@ function insulinStats (boluses, rateAt, from, to) {
  * body ISF share `k`. Returns { from, to, k, windows, actual, simulated
  * (results at k, with low and high for the band), series, misses }.
  */
-export async function simulatePeriod (pool, { from, to, changes = {}, k = K_DEFAULT }) {
+export async function simulatePeriod (data, { from, to, changes = {}, k = K_DEFAULT }) {
   const [history, allRuns] = await Promise.all([
-    loadHistory(pool, { from: from - 24 * HOUR, to }),
-    loadRuns(pool, { from: from - (ISF_CACHE_HOURS + 1) * HOUR, to }),
+    loadHistory(data, { from: from - 24 * HOUR, to }),
+    loadRuns(data, { from: from - (ISF_CACHE_HOURS + 1) * HOUR, to }),
   ]);
   plannedTempDurations(history.temps, allRuns);
   const runs = allRuns;
   const settingsRuns = runs.filter((r) => r.timestamp >= Math.max(from - 24 * HOUR, to - 7 * 24 * HOUR));
-  const timeline = await loadSettingsTimeline(pool, { from, to, runs: settingsRuns, tempTargets: history.tempTargets });
+  const timeline = await loadSettingsTimeline(data, { from, to, runs: settingsRuns, tempTargets: history.tempTargets });
   const settings = timeline.last;
   // the settings at each run (entered ones change over time), the changes on top
   const settingsAt = (t) => ({ ...timeline.at(t).values, ...changes.settings });
   const values = settingsAt(to);
   const timeZone = history.timeZone;
-  const changed = historyWithChanges(history, await withStoredProfile(pool, changes, from), from, to);
+  const changed = historyWithChanges(history, await withStoredProfile(data, changes, from), from, to);
   const unsupported = runs.filter((r) => r.timestamp >= from && !ALGORITHMS.includes(runAlgorithm(r)));
   if (unsupported.length === runs.filter((r) => r.timestamp >= from).length) {
     return { from, to, k, error: 'No loop runs in that period that the simulator can decide' };

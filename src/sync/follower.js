@@ -5,14 +5,13 @@
 // changes, so the two cannot diverge.
 
 import { io } from 'socket.io-client';
-import { CollectionStore } from '../db/collection.js';
 import { prepare } from './normalize.js';
 
 export const FOLLOWED = ['entries', 'treatments', 'devicestatus', 'profile', 'food', 'heartrate'];
 
 export class Follower {
   /**
-   * @param ctx app context (pool, bus)
+   * @param ctx app context (data, bus)
    * @param options { url, token (access token on the followed server), interval (ms between polls), pageSize }
    */
   constructor (ctx, { url, token, interval = 60000, pageSize = 1000, fetch = globalThis.fetch }) {
@@ -27,7 +26,7 @@ export class Follower {
     // the older Last-Modified-header variant.  Learn which form this server
     // accepts on the first sync.
     this.historyMode = null;
-    this.stores = Object.fromEntries(FOLLOWED.map((c) => [c, new CollectionStore(ctx.pool, c)]));
+    this.stores = Object.fromEntries(FOLLOWED.map((c) => [c, ctx.data.collection(c)]));
     this.running = new Map(); // collection -> promise of the poll in progress
     this.again = new Set(); // collections to poll again when the current poll ends
     this.status = { url: this.url, lastSync: null, lastError: null, copied: 0 };
@@ -134,16 +133,12 @@ export class Follower {
 
   /** Where copying got to; a cursor of another server does not count (no URL: the migrated one). */
   async cursor (collection) {
-    const { rows } = await this.ctx.pool.query('SELECT last_modified, source_url FROM follow_state WHERE collection = $1', [collection]);
-    const r = rows[0];
+    const r = await this.ctx.data.follow.cursor(collection);
     return r && (r.source_url == null || r.source_url === this.url) ? Number(r.last_modified) : 0;
   }
 
   async saveCursor (collection, lastModified) {
-    await this.ctx.pool.query(
-      `INSERT INTO follow_state (collection, last_modified, source_url) VALUES ($1, $2, $3)
-       ON CONFLICT (collection) DO UPDATE SET last_modified = EXCLUDED.last_modified, source_url = EXCLUDED.source_url, updated_at = now()`,
-      [collection, lastModified, this.url]);
+    await this.ctx.data.follow.saveCursor(collection, lastModified, this.url);
   }
 
   async syncAll () {

@@ -10,7 +10,7 @@ const STATE_COOKIE = 'loopk_oauth_state';
  * session endpoint the UI reads, and administration of who may sign in.
  */
 export function createSessionRoutes (ctx) {
-  const { auth, config, pool } = ctx;
+  const { auth, config, data } = ctx;
   const router = express.Router();
   const callbackUrl = `${config.baseUrl}/auth/google/callback`;
   const google = config.google.clientId
@@ -52,7 +52,7 @@ export function createSessionRoutes (ctx) {
     const payload = ticket.getPayload();
     if (!payload?.email || !payload.email_verified) return res.redirect('/login?error=unverified');
 
-    const user = await signInUser(pool, config, payload);
+    const user = await signInUser(data, config, payload);
     if (!user) return res.redirect('/login?error=denied');
     res.cookie(auth.sessionCookieName(), auth.signSession(user), cookieOpts(30 * 24 * 3600 * 1000));
     res.redirect('/');
@@ -85,8 +85,7 @@ export function createSessionRoutes (ctx) {
 
   router.use('/api/admin', express.json());
   router.get('/api/admin/users', admin, h(async (req, res) => {
-    const { rows } = await pool.query('SELECT * FROM users ORDER BY email');
-    res.json(rows.map(userJson));
+    res.json((await data.users.list()).map(userJson));
   }));
   // Adds a person, or changes whether they are an admin.
   router.post('/api/admin/users', admin, h(async (req, res) => {
@@ -95,16 +94,12 @@ export function createSessionRoutes (ctx) {
     if (!/^[^@\s]+@[^@\s]+$/.test(email)) return res.status(400).json({ status: 400, message: 'Valid email is required' });
     if (typeof isAdmin !== 'boolean') return res.status(400).json({ status: 400, message: 'isAdmin must be true or false' });
     if (!isAdmin && await isSelf(req, email)) return res.status(409).json({ status: 409, message: 'You cannot remove your own admin rights' });
-    const { rows } = await pool.query(
-      `INSERT INTO users (email, is_admin) VALUES ($1, $2)
-       ON CONFLICT (email) DO UPDATE SET is_admin = EXCLUDED.is_admin RETURNING *`, [email, isAdmin]);
-    res.json(userJson(rows[0]));
+    res.json(userJson(await data.users.setAdmin(email, isAdmin)));
   }));
   router.delete('/api/admin/users/:email', admin, h(async (req, res) => {
     const email = req.params.email.toLowerCase();
     if (await isSelf(req, email)) return res.status(409).json({ status: 409, message: 'You cannot remove yourself' });
-    const { rowCount } = await pool.query('DELETE FROM users WHERE email = $1', [email]);
-    res.json({ ok: rowCount > 0 });
+    res.json({ ok: await data.users.remove(email) });
   }));
 
   // --- following another Nightscout server, for admins -------------------
@@ -137,17 +132,10 @@ export function createSessionRoutes (ctx) {
  * ADMIN_EMAILS are always admins; ALLOWED_EMAILS and people added by an
  * admin may sign in (as admins if an admin made them one).
  */
-export async function signInUser (pool, config, { email, name, picture }) {
+export async function signInUser (data, config, { email, name, picture }) {
   email = email.toLowerCase();
   const isAdmin = config.adminEmails.includes(email);
   const listed = config.allowedEmails.includes(email);
-  const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-  if (!isAdmin && !listed && !rows[0]) return null;
-
-  const result = await pool.query(
-    `INSERT INTO users (email, name, picture, is_admin, last_login) VALUES ($1, $2, $3, $4, now())
-     ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, picture = EXCLUDED.picture,
-       is_admin = users.is_admin OR EXCLUDED.is_admin, last_login = now()
-     RETURNING *`, [email, name || null, picture || null, isAdmin]);
-  return result.rows[0];
+  if (!isAdmin && !listed && !await data.users.get(email)) return null;
+  return data.users.signedIn({ email, name, picture, isAdmin });
 }

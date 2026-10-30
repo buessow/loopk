@@ -58,7 +58,7 @@ export function linkGuide (publicUrl) {
 }
 
 export function createMcpServer (ctx, { by = null } = {}) {
-  const { pool } = ctx;
+  const { data: source } = ctx;
   const server = new McpServer(
     { name: 'loopk', version: '1.0.0' },
     {
@@ -95,7 +95,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
     inputSchema: { from: time, to: time, group_by: z.enum(['none', 'day', 'hour_of_day']).optional(), units, timeZone },
   }, async (args) => {
     const [from, to] = range(args, 14 * DAY, 366 * DAY);
-    return data.statistics(pool, { from, to, groupBy: args.group_by, ...await common(args) });
+    return data.statistics(source, { from, to, groupBy: args.group_by, ...await common(args) });
   });
 
   tool('get_glucose', {
@@ -104,7 +104,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
     inputSchema: { from: time, to: time, units, timeZone },
   }, async (args) => {
     const [from, to] = range(args, DAY, 14 * DAY);
-    return data.glucoseReadings(pool, { from, to, ...await common(args) });
+    return data.glucoseReadings(source, { from, to, ...await common(args) });
   });
 
   tool('get_treatments', {
@@ -113,7 +113,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
     inputSchema: { from: time, to: time, units, timeZone },
   }, async (args) => {
     const [from, to] = range(args, DAY, 14 * DAY);
-    return data.treatmentRecords(pool, { from, to, ...await common(args) });
+    return data.treatmentRecords(source, { from, to, ...await common(args) });
   });
 
   tool('get_heart_rate', {
@@ -122,14 +122,14 @@ export function createMcpServer (ctx, { by = null } = {}) {
     inputSchema: { from: time, to: time, timeZone },
   }, async (args) => {
     const [from, to] = range(args, DAY, 14 * DAY);
-    return data.heartRate(pool, { from, to, ...await common(args) });
+    return data.heartRate(source, { from, to, ...await common(args) });
   });
 
   tool('get_profile', {
     title: 'Profile in effect',
     description: 'The therapy profile in effect at a time (default now): basal rates (U/h), ISF (glucose per U), carb ratio (g per U), targets and DIA, as schedules of [local time of day, value], with the percentage and time shift of the profile switch.',
     inputSchema: { at: time.describe('ISO 8601 time or epoch ms (default now)'), units, timeZone },
-  }, async (args) => data.profile(pool, { at: parseTime(args.at, 'at') ?? Date.now(), ...await common(args) }));
+  }, async (args) => data.profile(source, { at: parseTime(args.at, 'at') ?? Date.now(), ...await common(args) }));
 
   tool('get_profile_usage', {
     title: 'Basal profiles in use',
@@ -137,7 +137,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
     inputSchema: { from: time, to: time, timeZone },
   }, async (args) => {
     const [from, to] = range(args, 30 * DAY, 366 * DAY);
-    return data.profiles(pool, { from, to, ...await common(args) });
+    return data.profiles(source, { from, to, ...await common(args) });
   });
 
   tool('get_misses', {
@@ -146,7 +146,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
     inputSchema: { from: time, to: time, kind: z.enum(['all', 'low', 'high']).optional(), units, timeZone },
   }, async (args) => {
     const [from, to] = range(args, 30 * DAY, 366 * DAY);
-    return data.misses(pool, { from, to, kind: args.kind || 'all', ...await common(args) });
+    return data.misses(source, { from, to, kind: args.kind || 'all', ...await common(args) });
   });
 
   tool('get_loop_runs', {
@@ -162,7 +162,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
     },
   }, async (args) => {
     const [from, to] = range(args, 3 * HOUR, args.console ? 3 * HOUR : DAY);
-    return data.loopRuns(pool, { from, to, curves: !!args.curves, console: !!args.console, ...await common(args) });
+    return data.loopRuns(source, { from, to, curves: !!args.curves, console: !!args.console, ...await common(args) });
   });
 
   const changes = z.object({
@@ -187,7 +187,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
     title: 'AAPS settings at a time',
     description: 'The AAPS loop settings in effect at a time (default now), as the simulator uses them: values by AAPS\'s internal names, where each came from (entered: by the person on loopk\'s simulate page; configuration: AAPS\'s uploaded configuration; console/reason: read from the algorithm\'s logs; default: AAPS\'s default, as AAPS uploads not all settings), and AAPS\'s defaults. Glucose values in mg/dL.',
     inputSchema: { at: time.describe('ISO 8601 time or epoch ms (default now)'), timeZone },
-  }, async (args) => simulate.settings(pool, { at: parseTime(args.at, 'at') ?? Date.now(), ...await common(args) }));
+  }, async (args) => simulate.settings(source, { at: parseTime(args.at, 'at') ?? Date.now(), ...await common(args) }));
 
   tool('simulate_run', {
     title: 'What if: one loop decision',
@@ -196,7 +196,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
   }, async (args) => {
     const t = parseTime(args.time, 'time');
     if (t == null) throw new ToolError('time is needed');
-    return simulate.run(pool, { time: t, changes: args.changes, ...await common(args) });
+    return simulate.run(source, { time: t, changes: args.changes, ...await common(args) });
   });
 
   tool('simulate_period', {
@@ -214,7 +214,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
     const [from, to] = range(args, DAY, MAX_PERIOD);
     const k = args.body_isf_share;
     if (k != null && !(k > 0 && k <= 3)) throw new ToolError('body_isf_share must be above 0, at most 3');
-    return simulate.period(pool, { from, to: Math.min(to, Date.now()), changes: args.changes, k, ...await common(args) });
+    return simulate.period(source, { from, to: Math.min(to, Date.now()), changes: args.changes, k, ...await common(args) });
   });
 
   const schedule = (what) => z.array(z.tuple([z.string(), z.number()])).optional()
@@ -223,7 +223,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
     title: 'The AI Test profile',
     description: 'The "AI Test" profile agents edit with set_test_profile to simulate with (profile name "AI Test" in simulate_run and simulate_period): its schedules (basal U/h, ISF glucose per U, carb ratio g per U, targets), DIA, the profile it started from and the note on what was changed and why. It stays in loopk: AAPS never receives it. link opens loopk\'s Profiles page, where the person can compare it and copy it into a real profile.',
     inputSchema: { units, timeZone },
-  }, async (args) => simulate.testProfile(pool, await common(args)));
+  }, async (args) => simulate.testProfile(source, await common(args)));
 
   tool('set_test_profile', {
     title: 'Write the AI Test profile',
@@ -241,7 +241,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
       timeZone,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
-  }, async (args) => simulate.setTestProfile(pool, args, { ...await common(args), by }));
+  }, async (args) => simulate.setTestProfile(source, args, { ...await common(args), by }));
 
   tool('get_algorithm_guide', {
     title: 'How AAPS doses',

@@ -3,7 +3,7 @@
 // agent asks for (mmol/L or mg/dL); times are ISO 8601 in the person's time
 // zone. The database keeps glucose in mg/dL.
 
-import { VALID_SGV, predict, recentRecords, zoneOffset } from '../predict/index.js';
+import { predict, recentRecords, zoneOffset } from '../predict/index.js';
 import { hourlyTotals, COLUMNS } from '../reports/index.js';
 import { profileUsage } from '../reports/profiles.js';
 import { profileAt } from '../analysis/context.js';
@@ -17,7 +17,6 @@ const MIN = 60000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const MGDL_PER_MMOL = 18;
-const VALID = 'is_valid IS DISTINCT FROM false';
 const COL = Object.fromEntries(COLUMNS.map((c, i) => [c, i]));
 
 const ms = (d) => (d == null ? null : new Date(d).getTime());
@@ -54,16 +53,14 @@ export function pageLink (publicUrl, { from, to, show, timeZone }) {
 /** The person's time zone: TIME_ZONE, else the profile's, else UTC. */
 export async function defaultTimeZone (ctx) {
   if (ctx.config?.timeZone) return ctx.config.timeZone;
-  const p = await profileAt(ctx.pool, Date.now());
+  const p = await profileAt(ctx.data, Date.now());
   return p?.timezone || 'UTC';
 }
 
 // --- glucose, treatments, heart rate -------------------------------------
 
-export async function glucoseReadings (pool, { from, to, units, timeZone, publicUrl }) {
-  const { rows } = await pool.query(
-    `SELECT date, sgv::float8 AS sgv, direction FROM entries WHERE ${VALID_SGV} AND date >= $1 AND date < $2 ORDER BY date`,
-    [new Date(from), new Date(to)]);
+export async function glucoseReadings (data, { from, to, units, timeZone, publicUrl }) {
+  const rows = await data.glucose.between(from, to);
   return {
     units,
     link: pageLink(publicUrl, { from, to, timeZone }),
@@ -75,18 +72,8 @@ export async function glucoseReadings (pool, { from, to, units, timeZone, public
 // Temp target values are mg/dL; a few clients send mmol/L.
 const targetMgdl = (v) => (v == null ? null : v < 30 ? v * MGDL_PER_MMOL : v);
 
-export async function treatmentRecords (pool, { from, to, units, timeZone }) {
-  const { rows } = await pool.query(
-    `SELECT date, event_type, type, is_smb, insulin::float8 AS insulin, carbs::float8 AS carbs,
-       protein::float8 AS protein, fat::float8 AS fat,
-       coalesce(duration_in_milliseconds / 60000.0, duration)::float8 AS minutes,
-       coalesce(absolute, rate)::float8 AS rate, percent::float8 AS percent,
-       target_bottom::float8 AS target_bottom, target_top::float8 AS target_top,
-       profile, percentage::float8 AS percentage, timeshift::float8 AS timeshift, reason, notes, entered_by
-     FROM treatments
-     WHERE date >= $1 AND date < $2 AND ${VALID} AND coalesce(type, '') <> 'PRIMING'
-     ORDER BY date`,
-    [new Date(from), new Date(to)]);
+export async function treatmentRecords (data, { from, to, units, timeZone }) {
+  const rows = await data.treatments.between(from, to);
   return {
     units,
     treatments: rows.map((t) => {
@@ -115,11 +102,8 @@ export async function treatmentRecords (pool, { from, to, units, timeZone }) {
   };
 }
 
-export async function heartRate (pool, { from, to, timeZone }) {
-  const { rows } = await pool.query(
-    `SELECT date, beats_per_minute::float8 AS bpm FROM heartrate
-     WHERE date >= $1 AND date < $2 AND ${VALID} AND beats_per_minute BETWEEN 25 AND 250 ORDER BY date`,
-    [new Date(from), new Date(to)]);
+export async function heartRate (data, { from, to, timeZone }) {
+  const rows = await data.heartrate.between(from, to);
   return { columns: ['time', 'bpm'], readings: rows.map((r) => [localTime(ms(r.date), timeZone), r.bpm]) };
 }
 
@@ -175,8 +159,8 @@ export const RANGES = {
   'mg/dL': { veryLow: '< 54', low: '54–69', target: '70–180', high: '181–250', veryHigh: '> 250' },
 };
 
-export async function statistics (pool, { from, to, units, timeZone, publicUrl, groupBy = 'none' }) {
-  const totals = await hourlyTotals(pool, { from, to, timeZone });
+export async function statistics (data, { from, to, units, timeZone, publicUrl, groupBy = 'none' }) {
+  const totals = await hourlyTotals(data, { from, to, timeZone });
   const out = {
     from: localTime(totals.from, timeZone),
     to: localTime(totals.to, timeZone),
@@ -202,8 +186,8 @@ export async function statistics (pool, { from, to, units, timeZone, publicUrl, 
 // --- profile ---------------------------------------------------------------
 
 /** The profile in effect at `at`, with ISF and targets in `units`. */
-export async function profile (pool, { at, units, timeZone }) {
-  const p = await profileAt(pool, at);
+export async function profile (data, { at, units, timeZone }) {
+  const p = await profileAt(data, at);
   if (!p) return { available: false };
   const s = p.schedules || {};
   const mmolProfile = /mmol/i.test(p.units || '');
@@ -232,8 +216,8 @@ const mean = (s) => (s?.n ? s.sum / s.n : null);
 const sd = (s) => (s?.n > 1 ? Math.sqrt(Math.max(0, (s.sumSq - s.sum * s.sum / s.n) / (s.n - 1))) : null);
 
 /** Basal profiles in use (src/reports/profiles.js), as means per hour of day instead of sums. */
-export async function profiles (pool, { from, to, timeZone }) {
-  const u = await profileUsage(pool, { from, to, timeZone });
+export async function profiles (data, { from, to, timeZone }) {
+  const u = await profileUsage(data, { from, to, timeZone });
   return {
     from: localTime(u.from, timeZone),
     to: localTime(u.to, timeZone),
@@ -268,8 +252,8 @@ const MISS_GLUCOSE = ['bg', 'eventual', 'target', 'minPredBG', 'minGuardBG', 'IO
 // The overlays a link to a miss or loop runs turns on.
 const LOOP_VIEW = ['basal', 'loop'];
 
-export async function misses (pool, { from, to, units, timeZone, publicUrl, kind = 'all' }) {
-  const found = (await findMisses(pool, { from, to })).filter((m) => kind === 'all' || m.kind === kind);
+export async function misses (data, { from, to, units, timeZone, publicUrl, kind = 'all' }) {
+  const found = (await findMisses(data, { from, to })).filter((m) => kind === 'all' || m.kind === kind);
   const text = (v) => `${glucose(v, units)} ${units}`;
   return {
     units,
@@ -308,56 +292,17 @@ export async function misses (pool, { from, to, units, timeZone, publicUrl, kind
 
 // --- the loop's runs (algorithm internals) ----------------------------------
 
-const RUNS = `SELECT identifier, date,
-     coalesce(enacted_bg, suggested_bg)::float8 AS bg,
-     coalesce(enacted_eventual_bg, suggested_eventual_bg)::float8 AS eventual_bg,
-     coalesce(enacted_target_bg, suggested_target_bg)::float8 AS target_bg,
-     coalesce(enacted_insulin_req, suggested_insulin_req)::float8 AS insulin_req,
-     coalesce(enacted_carbs_req, suggested_carbs_req)::float8 AS carbs_req,
-     coalesce(enacted_iob, suggested_iob, iob_iob)::float8 AS iob,
-     iob_basaliob::float8 AS basal_iob,
-     coalesce(enacted_cob, suggested_cob)::float8 AS cob,
-     coalesce(enacted_sensitivity_ratio, suggested_sensitivity_ratio)::float8 AS sensitivity_ratio,
-     coalesce(enacted_variable_sens, suggested_variable_sens)::float8 AS isf,
-     coalesce(enacted_rate, suggested_rate)::float8 AS rate,
-     coalesce(enacted_duration, suggested_duration)::float8 AS duration,
-     coalesce(enacted_units, suggested_units)::float8 AS smb,
-     enacted_smb::float8 AS smb_given,
-     coalesce(enacted_algorithm, suggested_algorithm) AS algorithm,
-     coalesce(enacted_running_dynamic_isf, suggested_running_dynamic_isf) AS dynamic_isf,
-     (enacted_reason IS NOT NULL OR enacted_bg IS NOT NULL) AS enacted,
-     coalesce(enacted_reason, suggested_reason) AS reason,
-     CASE WHEN $3 THEN coalesce(enacted_console_error, suggested_console_error) END AS console_error,
-     CASE WHEN $3 THEN coalesce(enacted_console_log, suggested_console_log) END AS console_log
-   FROM devicestatus
-   WHERE date >= $1 AND date < $2 AND ${VALID}
-     AND (suggested_bg IS NOT NULL OR enacted_bg IS NOT NULL OR suggested_reason IS NOT NULL)
-   ORDER BY date`;
-
-const CONFIGURATION = `SELECT date, configuration_aps AS aps, configuration_sensitivity AS sensitivity,
-     configuration_insulin AS insulin, configuration_version AS version,
-     aps_configuration AS aps_settings, sensitivity_configuration AS sensitivity_settings,
-     insulin_configuration AS insulin_settings, safety_configuration AS safety_settings
-   FROM devicestatus
-   WHERE date <= $1 AND ${VALID} AND configuration_aps IS NOT NULL
-   ORDER BY date DESC NULLS LAST LIMIT 1`;
-
-// The predicted curves of a run, enacted ones before suggested ones.
-const CURVES = `SELECT devicestatus_identifier AS id, source, curve, "values"
-   FROM devicestatus_predictions WHERE devicestatus_identifier = ANY($1)
-   ORDER BY CASE source WHEN 'enacted' THEN 0 ELSE 1 END`;
-
 const positive = (v) => (v != null && v >= 0 ? v : null);
 
-export async function loopRuns (pool, { from, to, units, timeZone, publicUrl, curves = false, console: withConsole = false }) {
-  const [{ rows }, { rows: [config] }] = await Promise.all([
-    pool.query(RUNS, [new Date(from), new Date(to), withConsole]),
-    pool.query(CONFIGURATION, [new Date(to)]),
+export async function loopRuns (data, { from, to, units, timeZone, publicUrl, curves = false, console: withConsole = false }) {
+  const [rows, config] = await Promise.all([
+    data.loop.runs(from, to, withConsole),
+    data.loop.configuration(to),
   ]);
   const runs = uniqueRuns(rows.map((r) => ({ ...r, date: ms(r.date) })));
   const predicted = new Map();
   if (curves && runs.length) {
-    const { rows: list } = await pool.query(CURVES, [runs.map((r) => r.identifier)]);
+    const list = await data.loop.curves(runs.map((r) => r.identifier));
     for (const c of list) {
       const run = predicted.get(c.id) || {};
       if (!run[c.curve]) run[c.curve] = c.values.map((v) => glucose(v, units));
@@ -422,21 +367,15 @@ export async function loopRuns (pool, { from, to, units, timeZone, publicUrl, cu
 
 /** What the page's tiles show, and the state of the loop, now. */
 export async function status (ctx, { units, timeZone, now = Date.now() }) {
-  const { pool } = ctx;
-  const [{ rows: readings }, { rows: [run] }, { rows: [temp] }, { rows: [target] }, { rows: [hr] }, p, stats, sport, forecast] = await Promise.all([
-    pool.query(`SELECT date, sgv::float8 AS sgv, direction FROM entries WHERE ${VALID_SGV} AND date <= $1 ORDER BY date DESC NULLS LAST LIMIT 2`, [new Date(now)]),
-    pool.query(`SELECT date, coalesce(enacted_iob, suggested_iob, iob_iob)::float8 AS iob, coalesce(enacted_cob, suggested_cob)::float8 AS cob,
-        coalesce(enacted_eventual_bg, suggested_eventual_bg)::float8 AS eventual_bg, coalesce(enacted_target_bg, suggested_target_bg)::float8 AS target_bg,
-        coalesce(enacted_algorithm, suggested_algorithm) AS algorithm, coalesce(enacted_reason, suggested_reason) AS reason
-      FROM devicestatus WHERE date <= $1 AND ${VALID} AND (suggested_bg IS NOT NULL OR enacted_bg IS NOT NULL) ORDER BY date DESC NULLS LAST LIMIT 1`, [new Date(now)]),
-    pool.query(`SELECT date, coalesce(absolute, rate)::float8 AS rate, coalesce(duration_in_milliseconds / 60000.0, duration)::float8 AS minutes
-      FROM treatments WHERE event_type = 'Temp Basal' AND date <= $1 AND ${VALID} ORDER BY date DESC NULLS LAST LIMIT 1`, [new Date(now)]),
-    pool.query(`SELECT date, target_bottom::float8 AS bottom, target_top::float8 AS top, reason,
-        coalesce(duration_in_milliseconds / 60000.0, duration)::float8 AS minutes
-      FROM treatments WHERE event_type = 'Temporary Target' AND date <= $1 AND ${VALID} ORDER BY date DESC NULLS LAST LIMIT 1`, [new Date(now)]),
-    pool.query(`SELECT date, beats_per_minute::float8 AS bpm FROM heartrate WHERE date <= $1 AND ${VALID} ORDER BY date DESC NULLS LAST LIMIT 1`, [new Date(now)]),
-    profile(pool, { at: now, units, timeZone }),
-    statistics(pool, { from: now - DAY, to: now, units, timeZone }),
+  const { data } = ctx;
+  const [readings, run, temp, target, hr, p, stats, sport, forecast] = await Promise.all([
+    data.glucose.latest(now, 2),
+    data.loop.latest(now),
+    data.treatments.latestTempBasal(now),
+    data.treatments.latestTempTarget(now),
+    data.heartrate.latest(now),
+    profile(data, { at: now, units, timeZone }),
+    statistics(data, { from: now - DAY, to: now, units, timeZone }),
     ctx.sport?.state(now).catch(() => null),
     loopkForecast(ctx, units, timeZone).catch(() => null),
   ]);
@@ -482,7 +421,7 @@ export async function status (ctx, { units, timeZone, now = Date.now() }) {
 async function loopkForecast (ctx, units, timeZone) {
   const row = await ctx.models?.current();
   if (!row) return null;
-  const { readings, treatments } = await recentRecords(ctx.pool, row.model);
+  const { readings, treatments } = await recentRecords(ctx.data, row.model);
   const p = predict(readings, { model: row.model, treatments });
   if (!p.available) return { available: false, reason: p.reason };
   return {

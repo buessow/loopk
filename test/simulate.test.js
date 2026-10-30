@@ -37,7 +37,7 @@ before(async () => {
   s = await startServer();
   writer = await tokenFor(s.ctx, 'aaps');
   reader = await tokenFor(s.ctx, 'watch', { canWrite: false });
-  const user = await signInUser(s.ctx.pool, s.ctx.config, { email: 'admin@example.com' });
+  const user = await signInUser(s.ctx.data, s.ctx.config, { email: 'admin@example.com' });
   cookie = `${s.ctx.auth.sessionCookieName()}=${s.ctx.auth.signSession(user)}`;
   const post = (col, doc) => request(s.app).post(`/api/v3/${col}`).set(auth(writer))
     .send({ app: 'AAPS', device: 'phone', utcOffset: 0, ...doc }).expect(201);
@@ -144,7 +144,7 @@ test('a stored profile can stand in for the one recorded', async () => {
 test('the AI Test profile is simulated with, and an admin copies it into a profile', async () => {
   await run({ profile: { name: 'AI Test' } }).expect(400);
   const flat = (v) => [[0, v]];
-  await saveTestProfile(s.ctx.pool, {
+  await saveTestProfile(s.ctx.data, {
     profile: { dia: 6, units: 'mg/dl', basal: flat(0.8), isf: flat(100), ic: flat(12), targetLow: flat(110), targetHigh: flat(110) },
     basedOn: 'Default', note: 'weaker ISF',
   }, 'agent');
@@ -224,11 +224,11 @@ test('settings entered by an admin become the baseline from their time', async (
   const { body } = await run({}).expect(200);
   assert.ok(body.baseline.smb > 0);
   // replays and periods take the settings in effect at each run
-  const timeline = await loadSettingsTimeline(s.ctx.pool, { from: T - 2 * HOUR, to: T });
+  const timeline = await loadSettingsTimeline(s.ctx.data, { from: T - 2 * HOUR, to: T });
   assert.equal(timeline.at(T - 2 * HOUR).values.enableSMB_always, false);
   assert.equal(timeline.at(T - HOUR).values.enableSMB_always, true);
   assert.equal(timeline.last.values.enableSMB_always, true);
-  await s.ctx.pool.query('DELETE FROM loop_settings');
+  await s.ctx.data.pool.query('DELETE FROM loop_settings');
 });
 
 test('changes are checked and applied to the profile as a switch would', () => {

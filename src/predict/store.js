@@ -86,26 +86,20 @@ export function modelProblems (model) {
 
 /** Newest model, cached until another one is uploaded (by any server). */
 export class ModelStore {
-  constructor (pool) {
-    this.pool = pool;
+  constructor (data) {
+    this.data = data;
     this.cached = null;
   }
 
   async current () {
-    const { rows } = await this.pool.query('SELECT id FROM prediction_models ORDER BY id DESC LIMIT 1');
-    if (!rows.length) return null;
-    if (this.cached?.id !== rows[0].id) {
-      const { rows: [row] } = await this.pool.query(
-        'SELECT id, model, uploaded_by, created_at FROM prediction_models WHERE id = $1', [rows[0].id]);
-      this.cached = row;
-    }
+    const id = await this.data.models.newestId();
+    if (id == null) return null;
+    if (this.cached?.id !== id) this.cached = await this.data.models.get(id);
     return this.cached;
   }
 
   async save (model, uploadedBy) {
-    const { rows: [row] } = await this.pool.query(
-      `INSERT INTO prediction_models (version, model, uploaded_by) VALUES ($1, $2, $3)
-       RETURNING id, model, uploaded_by, created_at`, [model.version, JSON.stringify(model), uploadedBy]);
+    const row = await this.data.models.save(model, uploadedBy);
     this.cached = row;
     return row;
   }

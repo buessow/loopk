@@ -64,7 +64,7 @@ after(async () => {
   await ns.close();
 });
 
-const count = async (table, where = 'TRUE') => (await s.ctx.pool.query(`SELECT count(*)::int AS n FROM ${table} WHERE ${where}`)).rows[0].n;
+const count = async (table, where = 'TRUE') => (await s.ctx.data.pool.query(`SELECT count(*)::int AS n FROM ${table} WHERE ${where}`)).rows[0].n;
 
 test('copies documents, cleaned up, and remembers where it got to', async () => {
   ns.docs.entries.push(entry('e1', 0, 1000), entry('e2', 5, 1001), entry('e3', 10, 1002));
@@ -82,7 +82,7 @@ test('copies documents, cleaned up, and remembers where it got to', async () => 
   assert.equal(await count('treatments'), 1);
   assert.equal(await count('heartrate'), 2);
   assert.equal(await count('food'), 0);
-  const { rows } = await s.ctx.pool.query("SELECT last_modified FROM follow_state WHERE collection = 'entries'");
+  const { rows } = await s.ctx.data.pool.query("SELECT last_modified FROM follow_state WHERE collection = 'entries'");
   assert.equal(Number(rows[0].last_modified), 1002);
 });
 
@@ -150,8 +150,9 @@ test('a cursor belongs to the server it was copied from', async () => {
 });
 
 test('admins set the server to follow on the Access page', async () => {
-  const { auth, pool, config } = s.ctx;
-  const cookieOf = async (email) => `${auth.sessionCookieName()}=${auth.signSession(await signInUser(pool, config, { email }))}`;
+  const { auth, data, config } = s.ctx;
+  const { pool } = data;
+  const cookieOf = async (email) => `${auth.sessionCookieName()}=${auth.signSession(await signInUser(data, config, { email }))}`;
   await pool.query("INSERT INTO users (email) VALUES ('viewer@example.com')");
   const viewer = await cookieOf('viewer@example.com');
   const admin = await cookieOf('admin@example.com');

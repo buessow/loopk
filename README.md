@@ -53,7 +53,7 @@ It implements the parts of the Nightscout API that AAPS's NSClient V3 uses:
 - **Token exchange** (`GET /api/v2/authorization/request/:accessToken`) returns the JWT AAPS refreshes on 401.
 - **`/storage` socket.io namespace**: live `create`/`update`/`delete` events after `subscribe { accessToken, collections }`.
 
-Each collection is a table with typed columns for the fields AAPS uses (`migrations/0001_init.sql`; the mapping from document fields to columns is in `src/db/schema.js`). Nested structures have child tables: a profile's named stores and their schedules, the profile embedded in profile switches (`profileJson`), and the loop's predicted glucose curves. `jsonb` is used only for parts without a fixed structure (pump driver and AAPS plugin settings, the bolus wizard result) and for an `extra` column that keeps fields this schema doesn't know, so documents round-trip unchanged.
+Each collection is a table with typed columns for the fields AAPS uses (`migrations/0001_init.sql`; the mapping from document fields to columns is in `src/data/postgres/schema.js`). Nested structures have child tables: a profile's named stores and their schedules, the profile embedded in profile switches (`profileJson`), and the loop's predicted glucose curves. `jsonb` is used only for parts without a fixed structure (pump driver and AAPS plugin settings, the bolus wizard result) and for an `extra` column that keeps fields this schema doesn't know, so documents round-trip unchanged.
 
 Treatments get two clean-ups that API clients don't see (`migrations/0010_treatment_cleanup.sql`):
 

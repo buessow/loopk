@@ -249,5 +249,5 @@ test('an agent writes the AI Test profile from a stored one, glucose in its unit
   assert.deepEqual(later.isfPerUnit[1], ['12:00', 2.5]);
   assert.match((await call('set_test_profile', { basal: [['06:00', 1]] })).error, /must start at 00:00/);
   assert.match((await call('set_test_profile', { based_on: 'Nope' })).error, /No stored profile named Nope/);
-  await s.ctx.pool.query('DELETE FROM test_profiles');
+  await s.ctx.data.pool.query('DELETE FROM test_profiles');
 });

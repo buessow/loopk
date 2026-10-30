@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
-import { CollectionStore } from '../src/db/collection.js';
+import { CollectionStore } from '../src/data/postgres/collection.js';
 import { startServer, tokenFor } from './helpers.js';
 
 let s;
@@ -31,10 +31,10 @@ async function post (doc) {
   return identifier;
 }
 
-const stored = async (identifier) => (await s.ctx.pool.query('SELECT identifier FROM treatments WHERE identifier = $1', [identifier])).rowCount === 1;
-const removed = async (identifier) => (await s.ctx.pool.query(
+const stored = async (identifier) => (await s.ctx.data.pool.query('SELECT identifier FROM treatments WHERE identifier = $1', [identifier])).rowCount === 1;
+const removed = async (identifier) => (await s.ctx.data.pool.query(
   'SELECT duplicate_of FROM removed_treatments WHERE identifier = $1', [identifier])).rows[0]?.duplicate_of ?? null;
-const delivered = async (identifier) => (await s.ctx.pool.query(
+const delivered = async (identifier) => (await s.ctx.data.pool.query(
   'SELECT delivered_insulin AS u FROM treatments WHERE identifier = $1', [identifier])).rows[0].u;
 
 test('a bolus uploaded again under another identifier is answered but kept out of treatments', async () => {
@@ -49,7 +49,7 @@ test('a bolus uploaded again under another identifier is answered but kept out o
   // Sent again, as an uploader retrying: still answered, still one copy kept away.
   await post({ identifier: copy, eventType: 'Meal Bolus', type: 'NORMAL', date: t + 3000, insulin: 0.4 });
   assert.equal(await removed(copy), smb);
-  assert.equal((await s.ctx.pool.query('SELECT count(*)::int AS n FROM removed_treatments WHERE identifier = $1', [copy])).rows[0].n, 1);
+  assert.equal((await s.ctx.data.pool.query('SELECT count(*)::int AS n FROM removed_treatments WHERE identifier = $1', [copy])).rows[0].n, 1);
 });
 
 test('the SMB stays when its copy came first', async () => {
@@ -87,7 +87,7 @@ test('a bolus with carbs is kept over the same bolus without them', async () => 
 
 test('followed and imported treatments are checked for duplicates too', async () => {
   const t = freshTime();
-  const store = new CollectionStore(s.ctx.pool, 'treatments');
+  const store = new CollectionStore(s.ctx.data.pool, 'treatments');
   const doc = (identifier, extra) => ({ identifier, date: t, srvCreated: t, srvModified: t, app: 'AAPS', eventType: 'Correction Bolus', ...extra });
   const moved = await store.bulkUpsert([
     doc('bulk-smb', { type: 'SMB', isSMB: true, insulin: 0.3, srvCreated: t + 10 }),

@@ -10,7 +10,6 @@
 // [[seconds from midnight, value]] in the profile's units, at 100%.
 
 import { resolveIdentifier } from '../api3/tools.js';
-import { CollectionStore } from '../db/collection.js';
 import { MMOLL_TO_MGDL } from './format.js';
 import { SimulationError, loadProfileStore } from './simulate.js';
 
@@ -82,29 +81,26 @@ const round = (v) => Math.round(v * 100) / 100;
 const valueAt = (list, s) => [...list].reverse().find(([t]) => t <= s)?.[1];
 
 /** The test profile: { name, ...profile, basedOn, note, updatedAt, updatedBy }, or null. */
-export async function loadTestProfile (pool) {
-  const { rows: [r] } = await pool.query('SELECT * FROM test_profiles WHERE name = $1', [TEST_PROFILE]);
+export async function loadTestProfile (data) {
+  const r = await data.testProfiles.get(TEST_PROFILE);
   return r ? { name: r.name, ...r.profile, basedOn: r.based_on, note: r.note, updatedAt: r.updated_at.getTime(), updatedBy: r.updated_by } : null;
 }
 
 /** Saves the test profile (checked by validProfile) and returns it as loadTestProfile does. */
-export async function saveTestProfile (pool, { profile, basedOn = null, note = null }, by = null) {
+export async function saveTestProfile (data, { profile, basedOn = null, note = null }, by = null) {
   const p = validProfile(profile);
   if (note != null && (typeof note !== 'string' || note.length > 2000)) throw new SimulationError('note must be text of at most 2000 characters');
-  await pool.query(
-    `INSERT INTO test_profiles (name, profile, based_on, note, updated_by) VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (name) DO UPDATE SET profile = $2, based_on = $3, note = $4, updated_by = $5, updated_at = now()`,
-    [TEST_PROFILE, p, basedOn, note, by]);
-  return loadTestProfile(pool);
+  await data.testProfiles.save(TEST_PROFILE, { profile: p, basedOn, note, by });
+  return loadTestProfile(data);
 }
 
-export async function deleteTestProfile (pool) {
-  await pool.query('DELETE FROM test_profiles WHERE name = $1', [TEST_PROFILE]);
+export async function deleteTestProfile (data) {
+  await data.testProfiles.remove(TEST_PROFILE);
 }
 
 /** The newest profile store document, or null. */
-export async function newestStore (pool) {
-  const [doc] = await new CollectionStore(pool, 'profile').findMany({ sort: { date: -1 }, limit: 1, onlyValid: true });
+export async function newestStore (data) {
+  const [doc] = await data.collection('profile').findMany({ sort: { date: -1 }, limit: 1, onlyValid: true });
   return doc || null;
 }
 
@@ -126,12 +122,12 @@ function convert (list, from, to) {
  */
 export async function copyTestProfile (ctx, { to, by, now = Date.now(), utcOffset = 0 }) {
   if (ctx.follower) throw new SimulationError(`This server follows ${ctx.follower.url} and accepts no changes`, 409);
-  const test = await loadTestProfile(ctx.pool);
+  const test = await loadTestProfile(ctx.data);
   if (!test) throw new SimulationError(`There is no ${TEST_PROFILE} profile to copy`, 404);
-  const doc = await newestStore(ctx.pool) || { store: {} };
+  const doc = await newestStore(ctx.data) || { store: {} };
   let target = doc.store?.[to];
   if (!target) {
-    const known = await loadProfileStore(ctx.pool, now);
+    const known = await loadProfileStore(ctx.data, now);
     if (!known.some((p) => p.name === to)) throw new SimulationError(`There is no profile ${to}`, 404);
     const { units, timezone, carbs_hr: carbsHr, delay } = doc.store?.[doc.defaultProfile] || Object.values(doc.store || {})[0] || {};
     target = { units: units || test.units, timezone: timezone || test.timezone || 'UTC', ...(carbsHr != null ? { carbs_hr: carbsHr } : {}), ...(delay != null ? { delay } : {}) };
@@ -156,7 +152,7 @@ export async function copyTestProfile (ctx, { to, by, now = Date.now(), utcOffse
     srvModified: now,
   };
   resolveIdentifier(copy);
-  const stored = await new CollectionStore(ctx.pool, 'profile').insert(copy);
+  const stored = await ctx.data.collection('profile').insert(copy);
   ctx.bus?.emit('storage-socket-create', { colName: 'profile', doc: stored });
   ctx.bus?.emit('data-received', { colName: 'profile' });
   return stored;

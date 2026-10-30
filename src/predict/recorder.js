@@ -4,14 +4,14 @@
 // prediction are caught up too: after a model upload, a restart or a
 // backlog upload from the phone.
 
-import { buildInputs, historyMinutes, newestReading, readingsBetween, run, treatmentMinutes, treatmentsBetween, VALID_SGV } from './index.js';
+import { buildInputs, historyMinutes, newestReading, readingsBetween, run, treatmentMinutes, treatmentsBetween } from './index.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
 
 export class PredictionRecorder {
   /**
-   * @param ctx app context (pool, bus)
+   * @param ctx app context (data, bus)
    * @param models the ModelStore
    */
   constructor (ctx, models, { minutes = [15, 30], catchUpHours = 24, delayMs = 2000 } = {}) {
@@ -73,20 +73,16 @@ export class PredictionRecorder {
     const row = await this.models.current();
     if (!row) return 0;
     const { model } = row;
-    const { pool } = this.ctx;
-    const newest = await newestReading(pool);
+    const { data } = this.ctx;
+    const newest = await newestReading(data);
     if (newest == null) return 0;
-    const { rows } = await pool.query(
-      `SELECT DISTINCT date FROM entries e WHERE ${VALID_SGV} AND date > $1
-          AND NOT EXISTS (SELECT 1 FROM glucose_predictions p WHERE p.made_at = e.date)
-        ORDER BY date`, [new Date(newest - this.catchUpHours * HOUR)]);
-    if (!rows.length) return 0;
-    const dates = rows.map((r) => new Date(r.date).getTime());
+    const dates = await data.predictions.unpredicted(newest - this.catchUpHours * HOUR);
+    if (!dates.length) return 0;
     const span = historyMinutes(model) * MIN;
-    const readings = await readingsBetween(pool, dates[0] - span, dates[dates.length - 1]);
+    const readings = await readingsBetween(data, dates[0] - span, dates[dates.length - 1]);
     const slotMs = model.slotMinutes * MIN;
     const treatments = treatmentMinutes(model)
-      ? await treatmentsBetween(pool, dates[0] - treatmentMinutes(model) * MIN, (Math.floor(dates[dates.length - 1] / slotMs) + 1) * slotMs)
+      ? await treatmentsBetween(data, dates[0] - treatmentMinutes(model) * MIN, (Math.floor(dates[dates.length - 1] / slotMs) + 1) * slotMs)
       : {};
 
     const out = { madeAt: [], minutes: [], date: [], sgv: [], low: [], high: [] };
@@ -110,21 +106,13 @@ export class PredictionRecorder {
       }
     }
     if (!out.sgv.length) return 0;
-    const { rowCount } = await pool.query(
-      `INSERT INTO glucose_predictions (made_at, minutes, date, sgv, low, high, model_id)
-       SELECT *, $7::bigint FROM unnest($1::timestamptz[], $2::smallint[], $3::timestamptz[], $4::real[], $5::real[], $6::real[])
-       ON CONFLICT DO NOTHING`,
-      [out.madeAt, out.minutes, out.date, out.sgv, out.low, out.high, row.id]);
-    return rowCount;
+    return data.predictions.save(out, row.id);
   }
 }
 
 /** Recorded predictions for from <= date < to (ms), oldest first. */
-export async function recordedPredictions (pool, from, to) {
-  const { rows } = await pool.query(
-    `SELECT made_at, minutes, date, sgv, low, high FROM glucose_predictions
-      WHERE date >= $1 AND date < $2 ORDER BY date, minutes`, [new Date(from), new Date(to)]);
-  return rows.map((r) => {
+export async function recordedPredictions (data, from, to) {
+  return (await data.predictions.between(from, to)).map((r) => {
     const madeAt = new Date(r.made_at).getTime();
     return {
       identifier: `${madeAt}-${r.minutes}`,

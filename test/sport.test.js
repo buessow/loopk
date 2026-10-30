@@ -23,7 +23,7 @@ before(async () => {
   s = await startServer();
   writer = await tokenFor(s.ctx, 'aaps');
   reader = await tokenFor(s.ctx, 'watch', { canWrite: false });
-  const user = await signInUser(s.ctx.pool, s.ctx.config, { email: 'admin@example.com' });
+  const user = await signInUser(s.ctx.data, s.ctx.config, { email: 'admin@example.com' });
   cookie = `${s.ctx.auth.sessionCookieName()}=${s.ctx.auth.signSession(user)}`;
   const post = (col, doc) => request(s.app).post(`/api/v3/${col}`).set(auth(writer))
     .send({ app: 'AAPS', device: 'phone', utcOffset: 120, ...doc }).expect(201);

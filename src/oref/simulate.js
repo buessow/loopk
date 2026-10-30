@@ -103,32 +103,10 @@ const complete = (p) => p.basal && p.ic && p.isf && p.targetLow && p.targetHigh;
  * [{ name, dia, units, basal, ic, isf, targetLow, targetHigh }], schedules
  * [[seconds, value]] in the profile's units, at 100%.
  */
-export async function loadProfileStore (pool, at) {
-  const [switched, stored] = await Promise.all([
-    pool.query(`WITH latest AS (
-        SELECT DISTINCT ON (t.original_profile_name) t.identifier, t.original_profile_name AS name, t.date,
-          coalesce(t.original_percentage, 100)::float8 AS percentage
-        FROM treatments t
-        WHERE t.event_type = 'Note' AND t.original_profile_name IS NOT NULL AND t.is_valid IS DISTINCT FROM false
-          AND t.date <= $1 AND t.date > $1::timestamptz - interval '365 days'
-        ORDER BY t.original_profile_name, t.date DESC)
-      SELECT l.name, l.date, l.percentage, p.dia::float8 AS dia, p.units, s.kind,
-        coalesce(s.seconds, extract(epoch FROM s.time::time)::int) AS seconds, s.value::float8 AS value
-      FROM latest l JOIN treatment_profiles p ON p.treatment_identifier = l.identifier
-        JOIN treatment_profile_schedules s ON s.treatment_identifier = l.identifier
-      ORDER BY l.date DESC, s.kind, s.position`, [new Date(at)]),
-    pool.query(`WITH latest AS (
-        SELECT DISTINCT ON (s.name) s.profile_identifier, s.name, s.dia, s.units, p.date
-        FROM profile p JOIN profile_stores s ON s.profile_identifier = p.identifier
-        WHERE p.date <= $1 AND p.is_valid IS DISTINCT FROM false
-        ORDER BY s.name, p.date DESC)
-      SELECT l.name, l.dia::float8 AS dia, l.units, c.kind,
-        coalesce(c.seconds, extract(epoch FROM c.time::time)::int) AS seconds, c.value::float8 AS value
-      FROM latest l JOIN profile_store_schedules c ON c.profile_identifier = l.profile_identifier AND c.name = l.name
-      ORDER BY l.date DESC, l.name, c.kind, c.position`, [new Date(at)]),
-  ]);
+export async function loadProfileStore (data, at) {
+  const [switched, stored] = await Promise.all([data.profiles.switchedInYear(at), data.profiles.storedLatest(at)]);
   const byName = new Map();
-  for (const r of switched.rows) {
+  for (const r of switched) {
     if (!byName.has(r.name)) byName.set(r.name, { name: r.name, dia: r.dia, units: r.units, percentage: r.percentage });
     const p = byName.get(r.name);
     // a switch's schedules have its percentage applied: back to 100%
@@ -136,7 +114,7 @@ export async function loadProfileStore (pool, at) {
     (p[SCHEDULE_KIND[r.kind]] ||= []).push([Number(r.seconds), r.value * f]);
   }
   const fromStore = new Map();
-  for (const r of stored.rows) {
+  for (const r of stored) {
     if (byName.has(r.name)) continue;
     if (!fromStore.has(r.name)) fromStore.set(r.name, { name: r.name, dia: r.dia, units: r.units });
     (fromStore.get(r.name)[SCHEDULE_KIND[r.kind]] ||= []).push([Number(r.seconds), r.value]);
@@ -145,11 +123,11 @@ export async function loadProfileStore (pool, at) {
 }
 
 /** Changes with a profile name resolved to that stored profile (`profile.store`). */
-export async function withStoredProfile (pool, changes, at) {
+export async function withStoredProfile (data, changes, at) {
   const name = changes.profile?.name;
   if (!name) return changes;
   // the agents' test profile (testprofile.js) before the profile store
-  const store = name === TEST_PROFILE ? await loadTestProfile(pool) : (await loadProfileStore(pool, at)).find((p) => p.name === name);
+  const store = name === TEST_PROFILE ? await loadTestProfile(data) : (await loadProfileStore(data, at)).find((p) => p.name === name);
   if (!store) throw new SimulationError(name === TEST_PROFILE ? `There is no ${TEST_PROFILE} profile yet: an agent creates it with set_test_profile` : `No stored profile named ${name}`);
   return { ...changes, profile: { ...changes.profile, store } };
 }
@@ -257,16 +235,16 @@ export const algorithmOptions = (name) => ({ algorithm: name === 'SMB+DynISF' ? 
  * Decides at `time` (ms) as recorded and with `changes` (parseChanges).
  * Returns { time, recorded, baseline, changed, settings, reproduces }.
  */
-export async function simulateRun (pool, { time, changes = {} }) {
-  const runs = await loadRuns(pool, { from: time - (ISF_CACHE_HOURS + 1) * HOUR, to: time + RUN_WINDOW });
+export async function simulateRun (data, { time, changes = {} }) {
+  const runs = await loadRuns(data, { from: time - (ISF_CACHE_HOURS + 1) * HOUR, to: time + RUN_WINDOW });
   let run = null;
   for (const r of runs) if (Math.abs(r.timestamp - time) <= RUN_WINDOW && (!run || Math.abs(r.timestamp - time) < Math.abs(run.timestamp - time))) run = r;
   if (!run) throw new SimulationError('No loop run within 5 minutes of that time', 404);
   if (!ALGORITHMS.includes(runAlgorithm(run))) throw new SimulationError(`The run's algorithm ${run.algorithm} can't be simulated`, 422);
   const before = runs.filter((r) => r.timestamp <= run.timestamp);
-  const history = await loadHistory(pool, { from: run.timestamp - 24 * HOUR, to: run.timestamp });
+  const history = await loadHistory(data, { from: run.timestamp - 24 * HOUR, to: run.timestamp });
   plannedTempDurations(history.temps, before);
-  const settings = await loadSettings(pool, { to: run.timestamp, runs: before.filter((r) => r.timestamp > run.timestamp - 24 * HOUR), tempTargets: history.tempTargets });
+  const settings = await loadSettings(data, { to: run.timestamp, runs: before.filter((r) => r.timestamp > run.timestamp - 24 * HOUR), tempTargets: history.tempTargets });
   const timeZone = history.timeZone;
 
   const decide = (hist, { algorithm, values, ratio }) => {
@@ -283,7 +261,7 @@ export async function simulateRun (pool, { time, changes = {} }) {
   // AAPS's ratio belongs to its algorithm: another one rebuilds its own
   const ratio = changes.sensitivityRatio ?? (changedAlgorithm === algorithm ? run.sensitivityRatio : null);
   const values = { ...settings.values, ...changes.settings };
-  const resolved = await withStoredProfile(pool, changes, run.timestamp);
+  const resolved = await withStoredProfile(data, changes, run.timestamp);
   const changed = decide(historyWithChanges(history, resolved, run.timestamp - 1), { algorithm: changedAlgorithm, values, ratio });
   return {
     time: run.timestamp,

@@ -1,8 +1,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer } from './helpers.js';
-import { DERIVED_COLUMNS, SCHEMAS } from '../src/db/schema.js';
-import { CollectionStore, docToColumns } from '../src/db/collection.js';
+import { DERIVED_COLUMNS, SCHEMAS } from '../src/data/postgres/schema.js';
+import { CollectionStore, docToColumns } from '../src/data/postgres/collection.js';
 
 let s;
 
@@ -18,7 +18,7 @@ const PG_TYPES = {
 
 test('schema.js matches the tables', async () => {
   for (const [table, fields] of Object.entries(SCHEMAS)) {
-    const { rows } = await s.ctx.pool.query(
+    const { rows } = await s.ctx.data.pool.query(
       'SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1', [table]);
     const actual = Object.fromEntries(rows.map((r) => [r.column_name, r.data_type]));
     const expected = Object.fromEntries(fields.map(([, col, type]) => [col, PG_TYPES[type]]));
@@ -34,7 +34,7 @@ const common = (identifier) => ({
 });
 
 async function roundTrip (table, doc) {
-  const store = new CollectionStore(s.ctx.pool, table);
+  const store = new CollectionStore(s.ctx.data.pool, table);
   await store.insert(doc);
   return store.findOne(doc.identifier);
 }
@@ -53,14 +53,14 @@ test('devicestatus round-trips, with predictions in rows', async () => {
     somethingNew: { a: [1, 2] },
   };
   assert.deepEqual(await roundTrip('devicestatus', doc), doc);
-  const { rows } = await s.ctx.pool.query(
+  const { rows } = await s.ctx.data.pool.query(
     "SELECT source, curve, \"values\" FROM devicestatus_predictions WHERE devicestatus_identifier = 'ds1' ORDER BY 1, 2");
   assert.deepEqual(rows, [
     { source: 'enacted', curve: 'COB', values: [100.5] },
     { source: 'suggested', curve: 'IOB', values: [120, 118, 116] },
     { source: 'suggested', curve: 'ZT', values: [120, 115] },
   ]);
-  const { rows: [row] } = await s.ctx.pool.query("SELECT extra, suggested_eventual_bg FROM devicestatus WHERE identifier = 'ds1'");
+  const { rows: [row] } = await s.ctx.data.pool.query("SELECT extra, suggested_eventual_bg FROM devicestatus WHERE identifier = 'ds1'");
   assert.deepEqual(row.extra, { somethingNew: { a: [1, 2] } });
   assert.equal(row.suggested_eventual_bg, 110);
 });
@@ -82,7 +82,7 @@ test('treatments keep profileJson and bolusCalculatorResult as structured data',
   assert.deepEqual(JSON.parse(back.profileJson), profile);
   assert.deepEqual(JSON.parse(back.bolusCalculatorResult), { glucoseValue: 7, wasCOBUsed: true });
   assert.deepEqual({ ...back, profileJson: 0, bolusCalculatorResult: 0 }, { ...doc, profileJson: 0, bolusCalculatorResult: 0 });
-  const { rows } = await s.ctx.pool.query("SELECT kind, count(*)::int AS n FROM treatment_profile_schedules GROUP BY kind ORDER BY kind");
+  const { rows } = await s.ctx.data.pool.query("SELECT kind, count(*)::int AS n FROM treatment_profile_schedules GROUP BY kind ORDER BY kind");
   assert.deepEqual(rows, [{ kind: 'basal', n: 2 }, { kind: 'sens', n: 1 }]);
 });
 
@@ -97,7 +97,7 @@ test('profile stores round-trip', async () => {
     },
   };
   assert.deepEqual(await roundTrip('profile', doc), doc);
-  const { rows } = await s.ctx.pool.query("SELECT name, dia, extra FROM profile_stores ORDER BY name");
+  const { rows } = await s.ctx.data.pool.query("SELECT name, dia, extra FROM profile_stores ORDER BY name");
   assert.deepEqual(rows, [
     { name: 'Default', dia: 5, extra: null },
     { name: 'Legacy', dia: null, extra: { dia: '4', basal: [{ time: '00:00', value: '0.7' }] } },
@@ -113,7 +113,7 @@ test('values of the wrong type and nulls are kept in extra', () => {
 test('date and server times are stored as timestamps and read back as milliseconds', async () => {
   const doc = { ...common('e-ms'), date: 1760000000123, srvCreated: 1760000000456, srvModified: 1760000000789, sgv: 100 };
   assert.deepEqual(await roundTrip('entries', doc), doc);
-  const { rows: [row] } = await s.ctx.pool.query("SELECT date, srv_created, srv_modified FROM entries WHERE identifier = 'e-ms'");
+  const { rows: [row] } = await s.ctx.data.pool.query("SELECT date, srv_created, srv_modified FROM entries WHERE identifier = 'e-ms'");
   assert.deepEqual(row, {
     date: new Date('2025-10-09T08:53:20.123Z'),
     srv_created: new Date('2025-10-09T08:53:20.456Z'),
@@ -130,7 +130,7 @@ test('dates a timestamp cannot hold are kept in extra', () => {
 });
 
 test('patch merges into the stored document', async () => {
-  const store = new CollectionStore(s.ctx.pool, 'treatments');
+  const store = new CollectionStore(s.ctx.data.pool, 'treatments');
   await store.insert({ ...common('t2'), eventType: 'Note', notes: 'a', foo: 1 });
   const patched = await store.patch('t2', { notes: 'b', bar: true, srvModified: 3 });
   assert.equal(patched.notes, 'b');
@@ -141,7 +141,7 @@ test('patch merges into the stored document', async () => {
 });
 
 test('bulkUpsert inserts and replaces documents, keeping their server timestamps', async () => {
-  const store = new CollectionStore(s.ctx.pool, 'devicestatus');
+  const store = new CollectionStore(s.ctx.data.pool, 'devicestatus');
   const doc = (id, eventual) => ({
     ...common(id), srvCreated: 100, srvModified: 200,
     openaps: { suggested: { eventualBG: eventual, algorithm: 'SMB', consoleLog: ['a', 'b'], predBGs: { IOB: [1, 2] } } },
@@ -152,17 +152,17 @@ test('bulkUpsert inserts and replaces documents, keeping their server timestamps
   const b2 = await store.findOne('b2');
   assert.equal(b2.openaps.suggested.predBGs, undefined);
   assert.equal(b2.srvModified, 200);
-  const { rows } = await s.ctx.pool.query("SELECT suggested_console_log FROM devicestatus WHERE identifier = 'b1'");
+  const { rows } = await s.ctx.data.pool.query("SELECT suggested_console_log FROM devicestatus WHERE identifier = 'b1'");
   assert.deepEqual(rows[0].suggested_console_log, ['a', 'b']);
 });
 
 /** The plan of the SQL findMany builds for `query` on `table`. */
 async function planFor (table, query) {
-  const store = new CollectionStore(s.ctx.pool, table);
+  const store = new CollectionStore(s.ctx.data.pool, table);
   let captured;
   store.pool = { query: async (sql, params) => { captured ??= { sql, params }; return { rows: [] }; } };
   await store.findMany(query);
-  const client = await s.ctx.pool.connect();
+  const client = await s.ctx.data.pool.connect();
   try {
     // Empty test tables make a table scan and a sort cheapest; forbid both so
     // the plan only falls back to them when no index can serve the query.
@@ -193,7 +193,7 @@ test('history and newest-first date searches are answered from an index without 
 });
 
 test('number filters on integer columns keep fractional values exact', async () => {
-  const store = new CollectionStore(s.ctx.pool, 'heartrate');
+  const store = new CollectionStore(s.ctx.data.pool, 'heartrate');
   await store.insert({ ...common('hr-fraction'), date: 1000, beatsPerMinute: 60 });
   const match = (filter) => store.findMany({ filter, sort: { date: 1 }, limit: 10 }).then((docs) => docs.map((d) => d.identifier));
   assert.deepEqual(await match([{ field: 'date', operator: 'gt', value: 999.5 }]), ['hr-fraction']);

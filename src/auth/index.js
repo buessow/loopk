@@ -33,26 +33,20 @@ function timingSafeEqualStr (a, b) {
  * browser sessions of people and admins.
  */
 export class Auth {
-  constructor (pool, config) {
-    this.pool = pool;
+  constructor (data, config) {
+    this.data = data;
     this.config = config;
     this.subjects = [];
   }
 
   async init () {
     // The JWT signing key is generated on first start and kept in the database.
-    const { rows } = await this.pool.query(
-      `INSERT INTO server_keys (name, value) VALUES ('jwt', $1)
-       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING value`,
-      [crypto.randomBytes(48).toString('base64url')]);
-    this.jwtSecret = rows[0].value;
+    this.jwtSecret = await this.data.serverKey('jwt', () => crypto.randomBytes(48).toString('base64url'));
     await this.reload();
   }
 
   async reload () {
-    const { rows } = await this.pool.query(
-      'SELECT id, name, can_write, can_upload_model, notes, access_token, created_at FROM subjects ORDER BY name');
-    this.subjects = rows;
+    this.subjects = await this.data.subjects.list();
   }
 
   static subjectPermissions (subject) {
@@ -78,26 +72,21 @@ export class Auth {
 
   async createSubject ({ name, canWrite = false, canUploadModel = false, notes = null }) {
     const token = Auth.generateAccessToken(name);
-    const { rows } = await this.pool.query(
-      `INSERT INTO subjects (name, can_write, can_upload_model, notes, access_token) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [name, canWrite, canUploadModel, notes, token]);
+    const subject = await this.data.subjects.create({ name, canWrite, canUploadModel, notes, token });
     await this.reload();
-    return rows[0];
+    return subject;
   }
 
   async updateSubject (id, { name, canWrite, canUploadModel, notes }) {
-    const { rows } = await this.pool.query(
-      `UPDATE subjects SET name = coalesce($2, name), can_write = coalesce($3, can_write),
-              can_upload_model = coalesce($4, can_upload_model), notes = coalesce($5, notes)
-       WHERE id = $1 RETURNING *`, [id, name ?? null, canWrite ?? null, canUploadModel ?? null, notes ?? null]);
+    const subject = await this.data.subjects.update(id, { name, canWrite, canUploadModel, notes });
     await this.reload();
-    return rows[0] || null;
+    return subject;
   }
 
   async deleteSubject (id) {
-    const { rowCount } = await this.pool.query('DELETE FROM subjects WHERE id = $1', [id]);
+    const removed = await this.data.subjects.remove(id);
     await this.reload();
-    return rowCount > 0;
+    return removed;
   }
 
   // --- JWT -------------------------------------------------------------------
@@ -146,8 +135,8 @@ export class Auth {
   async userForSession (cookie) {
     const decoded = cookie && this.verifyJWT(cookie);
     if (decoded?.typ === 'session') {
-      const { rows } = await this.pool.query('SELECT * FROM users WHERE email = $1', [decoded.email]);
-      if (rows[0]) return rows[0];
+      const user = await this.data.users.get(decoded.email);
+      if (user) return user;
     }
     // Local development without Google sign-in (AUTH_DISABLED, localhost only).
     if (this.config.authDisabled) return { email: 'local@localhost', name: 'Local', is_admin: true };

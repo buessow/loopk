@@ -49,12 +49,12 @@ export function compareRun (recorded, rebuilt, result) {
  * `recordedRatio` (the default) each run uses the sensitivity ratio AAPS
  * recorded; otherwise it is rebuilt from autosens or Dynamic ISF's TDDs.
  */
-export async function replay (pool, { from, to, warmupHours = 24, excludeDevices = [], settings: overrides = {}, recordedRatio = true }) {
+export async function replay (data, { from, to, warmupHours = 24, excludeDevices = [], settings: overrides = {}, recordedRatio = true }) {
   const [history, runs] = await Promise.all([
-    loadHistory(pool, { from: from - warmupHours * HOUR, to, excludeDevices }),
-    loadRuns(pool, { from: from - ISF_CACHE_HOURS * HOUR, to }),
+    loadHistory(data, { from: from - warmupHours * HOUR, to, excludeDevices }),
+    loadRuns(data, { from: from - ISF_CACHE_HOURS * HOUR, to }),
   ]);
-  const timeline = await loadSettingsTimeline(pool, { from, to, runs: runs.filter((r) => r.timestamp >= from), tempTargets: history.tempTargets });
+  const timeline = await loadSettingsTimeline(data, { from, to, runs: runs.filter((r) => r.timestamp >= from), tempTargets: history.tempTargets });
   // the settings at each run: entered ones where they changed, the overrides on top
   const valuesAt = (t) => ({ ...timeline.at(t).values, ...overrides });
   const settings = { values: valuesAt(to), sources: { ...timeline.last.sources } };

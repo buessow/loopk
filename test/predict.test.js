@@ -215,13 +215,13 @@ test('predictions are recorded once per reading and returned by the history', as
   assert.ok(recorded > 0 && recorded % 2 === 0, `${recorded} rows`);
   assert.equal(await s.ctx.predictions.record(), 0);
 
-  const newest = await newestReading(s.ctx.pool);
+  const newest = await newestReading(s.ctx.data);
   const res = await request(s.app).get(`/api/prediction/history?from=${newest - 3600000}&to=${newest + 3600000}`)
     .set(auth(reader)).expect(200);
   const latest = res.body.filter((p) => p.madeAt === newest);
   assert.deepEqual(latest.map((p) => p.minutes), [15, 30]);
   const current = { ...model, version: 'random-test-model-2' };
-  const { readings, treatments } = await recentRecords(s.ctx.pool, current, 0);
+  const { readings, treatments } = await recentRecords(s.ctx.data, current, 0);
   const live = predict(readings, { model: current, treatments });
   for (const p of latest) {
     const q = live.predictions.find((x) => x.minutes === p.minutes);
@@ -239,12 +239,12 @@ test('predictions are recorded once per reading and returned by the history', as
 
 test('a started recorder records when new readings arrive', async () => {
   const recorder = new PredictionRecorder(s.ctx, s.ctx.models, { delayMs: 10 });
-  const newest = await newestReading(s.ctx.pool);
+  const newest = await newestReading(s.ctx.data);
   recorder.start();
   try {
     const writer = await tokenFor(s.ctx, 'aaps-live');
     await addReadings(writer, newest + 5 * 60000, [118]);
-    const count = async () => (await s.ctx.pool.query('SELECT count(*)::int AS n FROM glucose_predictions WHERE made_at = $1', [new Date(newest + 5 * 60000)])).rows[0].n;
+    const count = async () => (await s.ctx.data.pool.query('SELECT count(*)::int AS n FROM glucose_predictions WHERE made_at = $1', [new Date(newest + 5 * 60000)])).rows[0].n;
     for (let i = 0; i < 100 && await count() < 2; i++) await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(await count(), 2);
   } finally {
@@ -276,7 +276,7 @@ test('treatments are read from the database as the model uses them', async () =>
   await addTreatment(writer, deleted);
   await request(s.app).delete('/api/v3/treatments/deleted-carbs').set(auth(writer)).expect(200);
 
-  const t = await treatmentsBetween(s.ctx.pool, at(-200), at(0));
+  const t = await treatmentsBetween(s.ctx.data, at(-200), at(0));
   assert.deepEqual(t.boluses, [{ date: at(-30), insulin: 0.4 }, { date: at(-10), insulin: 2 }]);
   assert.deepEqual(t.extended, [{ date: at(-40), insulin: 2, duration: 60 }]);
   assert.deepEqual(t.tempBasals, [

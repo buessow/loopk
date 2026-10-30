@@ -20,8 +20,8 @@
 
 import { parseArgs } from 'node:util';
 import { MongoClient, ObjectId } from 'mongodb';
-import { createPool } from '../src/db/index.js';
-import { CollectionStore } from '../src/db/collection.js';
+import { createPool } from '../src/data/postgres/pool.js';
+import { CollectionStore } from '../src/data/postgres/collection.js';
 import { prepare } from '../src/sync/normalize.js';
 
 const { values: args } = parseArgs({

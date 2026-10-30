@@ -32,15 +32,11 @@ export function createApi3 (ctx) {
   ctx.collections = collections;
 
   async function versionInfo () {
-    if (!ctx.storageVersion) {
-      const { rows } = await ctx.pool.query('SHOW server_version');
-      ctx.storageVersion = { storage: 'postgresql', version: rows[0].server_version };
-    }
     return {
       version: SERVER_VERSION,
       apiVersion: API3_VERSION,
       srvDate: Date.now(),
-      storage: ctx.storageVersion,
+      storage: await ctx.data.storage(),
     };
   }
 

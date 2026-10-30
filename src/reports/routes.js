@@ -15,7 +15,7 @@ const MAX_DASHBOARD_BYTES = 256 * 1024;
  */
 export function createReportRoutes (ctx) {
   const router = express.Router();
-  const { auth, pool } = ctx;
+  const { auth, data } = ctx;
   const h = (fn) => async (req, res, next) => {
     try {
       res.set('Cache-Control', 'no-store');
@@ -44,12 +44,12 @@ export function createReportRoutes (ctx) {
 
   router.get('/hours', read, h(async (req, res) => {
     const q = range(req, res);
-    if (q) res.json(await hourlyTotals(pool, q));
+    if (q) res.json(await hourlyTotals(data, q));
   }));
 
   router.get('/profiles', read, h(async (req, res) => {
     const q = range(req, res);
-    if (q) res.json(await profileUsage(pool, q));
+    if (q) res.json(await profileUsage(data, q));
   }));
 
   // Dashboards belong to people signed in to the web UI, not to access tokens.
@@ -64,9 +64,9 @@ export function createReportRoutes (ctx) {
   router.get('/dashboard', read, h(async (req, res) => {
     const email = await person(req, res);
     if (!email) return;
-    const { rows: [row] } = await pool.query('SELECT dashboard FROM report_dashboards WHERE email = $1', [email]);
-    if (!row) return res.status(204).end();
-    res.json(row.dashboard);
+    const dashboard = await data.dashboards.get(email);
+    if (!dashboard) return res.status(204).end();
+    res.json(dashboard);
   }));
 
   router.put('/dashboard', read, express.json({ limit: MAX_DASHBOARD_BYTES }), h(async (req, res) => {
@@ -76,10 +76,7 @@ export function createReportRoutes (ctx) {
     if (!body || typeof body !== 'object' || Array.isArray(body) || !Array.isArray(body.widgets)) {
       return res.status(400).json({ status: 400, message: 'A dashboard is an object with a list of widgets' });
     }
-    await pool.query(
-      `INSERT INTO report_dashboards (email, dashboard, updated_at) VALUES ($1, $2, now())
-       ON CONFLICT (email) DO UPDATE SET dashboard = EXCLUDED.dashboard, updated_at = now()`,
-      [email, JSON.stringify(body)]);
+    await data.dashboards.save(email, body);
     res.status(204).end();
   }));
 

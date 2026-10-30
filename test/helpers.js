@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { loadConfig } from '../src/config.js';
-import { createPool } from '../src/db/index.js';
-import { createApp, createContext, checkSchema } from '../src/app.js';
+import { createDataSource } from '../src/data/index.js';
+import { createApp, createContext } from '../src/app.js';
 import { attachSockets } from '../src/sockets.js';
 
 const DATA_TABLES = [
@@ -18,10 +18,10 @@ export async function startServer (env = {}) {
   const databaseUrl = process.env.TEST_DATABASE_URL;
   if (!databaseUrl) throw new Error('TEST_DATABASE_URL is not set: run ./setup-db-users.sh --local && ./setup-databases.sh --target=local');
   const config = loadConfig({ DATABASE_URL: databaseUrl, ADMIN_EMAILS: 'admin@example.com', ...env });
-  const pool = createPool(databaseUrl);
-  await checkSchema(pool);
-  await pool.query(`TRUNCATE ${DATA_TABLES.join(', ')}`);
-  const ctx = await createContext(config, pool);
+  const data = createDataSource(config);
+  await data.checkSchema();
+  await data.pool.query(`TRUNCATE ${DATA_TABLES.join(', ')}`);
+  const ctx = await createContext(config, data);
   const app = createApp(ctx);
   const server = http.createServer(app);
   const io = attachSockets(server, ctx);
@@ -35,7 +35,7 @@ export async function startServer (env = {}) {
     async close () {
       io.close();
       await new Promise((resolve) => server.close(resolve));
-      await pool.end();
+      await data.close();
     },
   };
 }

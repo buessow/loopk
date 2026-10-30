@@ -31,7 +31,7 @@ before(async () => {
 after(() => s.close());
 
 async function cookieFor (email) {
-  const user = await signInUser(s.ctx.pool, s.ctx.config, { email });
+  const user = await signInUser(s.ctx.data, s.ctx.config, { email });
   return `${s.ctx.auth.sessionCookieName()}=${s.ctx.auth.signSession(user)}`;
 }
 

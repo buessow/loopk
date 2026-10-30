@@ -5,35 +5,30 @@ import { MONITORED_COLLECTIONS, latestCollectionUpdates, reportFreshness } from 
 import { createStatsd } from '../src/monitoring/statsd.js';
 import { startServer } from './helpers.js';
 
-test('latestCollectionUpdates queries the Loopk timestamps used for freshness', async () => {
-  const queries = [];
-  const pool = {
-    async query (sql) {
-      queries.push(sql);
-      if (sql.includes('entries')) return { rows: [{ timestamp: 1760774400000 }] };
-      if (sql.includes('heartrate')) return { rows: [{ timestamp: new Date('2025-10-18T12:01:00Z') }] };
-      return { rows: [{ timestamp: null }] };
+test('latestCollectionUpdates reads the Loopk timestamps used for freshness', async () => {
+  const asked = [];
+  const data = {
+    async latest (collection, column) {
+      asked.push(`${collection}.${column}`);
+      if (collection === 'entries') return 1760774400000;
+      if (collection === 'heartrate') return new Date('2025-10-18T12:01:00Z');
+      return null;
     },
   };
 
-  assert.deepEqual(await latestCollectionUpdates(pool), [
+  assert.deepEqual(await latestCollectionUpdates(data), [
     { collection: 'entries', timestamp: 1760774400000 },
     { collection: 'heartrate', timestamp: 1760788860000 },
     { collection: 'treatments', timestamp: null },
     { collection: 'devicestatus', timestamp: null },
   ]);
-  assert.deepEqual(queries, [
-    'SELECT MAX(date) AS timestamp FROM entries',
-    'SELECT MAX(created_at) AS timestamp FROM heartrate',
-    'SELECT MAX(created_at) AS timestamp FROM treatments',
-    'SELECT MAX(created_at) AS timestamp FROM devicestatus',
-  ]);
+  assert.deepEqual(asked, ['entries.date', 'heartrate.created_at', 'treatments.created_at', 'devicestatus.created_at']);
 });
 
 test('every freshness query is answered from an index', async (t) => {
   const { ctx, close } = await startServer();
   t.after(close);
-  const client = await ctx.pool.connect();
+  const client = await ctx.data.pool.connect();
   try {
     // Empty test tables make a table scan cheapest; forbid it so the plan only
     // falls back to one when no index can answer the query.

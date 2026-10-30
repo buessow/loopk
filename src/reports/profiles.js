@@ -9,7 +9,7 @@
 
 import { createHash } from 'node:crypto';
 import { basalRates, profileEvents, profileRates, roundHalfEven } from '../predict/grid.js';
-import { VALID_SGV, treatmentsBetween, zoneOffset } from '../predict/index.js';
+import { treatmentsBetween, zoneOffset } from '../predict/index.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -20,11 +20,6 @@ const CHUNK = 30 * 24 * 60;
 const RATIO_STALE = 30;
 // Minutes of an hour with a known ratio for it to count as a sample of the ratio.
 const RATIO_COVER = 30;
-
-const RATIO_SQL = `
-  SELECT date, suggested_sensitivity_ratio::float8 AS ratio FROM devicestatus
-   WHERE suggested_sensitivity_ratio > 0 AND date >= $1 AND date < $2 AND is_valid IS DISTINCT FROM false
-   ORDER BY date`;
 
 const stat = () => ({ n: 0, sum: 0, sumSq: 0 });
 const addStat = (s, v) => {
@@ -73,16 +68,16 @@ function bucket (id, local, group) {
  * { basal, bolus (U/h), ratio (mean sensitivity ratio): { n, sum, sumSq } }
  * of whole local clock hours }] }.
  */
-export async function profileUsage (pool, { from, to, timeZone, now = Date.now() }) {
-  const { rows: [first] } = await pool.query(`SELECT min(date) AS date FROM entries WHERE ${VALID_SGV}`);
-  const start = first.date ? Math.max(from, new Date(first.date).getTime()) : Infinity;
+export async function profileUsage (data, { from, to, timeZone, now = Date.now() }) {
+  const first = await data.glucose.first();
+  const start = first != null ? Math.max(from, first) : Infinity;
   const firstMin = Math.ceil(start / MIN);
   const endMin = Math.floor(Math.min(to, now) / MIN);
   if (!(endMin > firstMin)) return { from: null, to: null, timeZone, minutes: 0, profiles: [] };
 
-  const [treatments, { rows: ratios }] = await Promise.all([
-    treatmentsBetween(pool, firstMin * MIN - DAY, endMin * MIN),
-    pool.query(RATIO_SQL, [new Date((firstMin - RATIO_STALE) * MIN), new Date(endMin * MIN)]),
+  const [treatments, ratios] = await Promise.all([
+    treatmentsBetween(data, firstMin * MIN - DAY, endMin * MIN),
+    data.loop.sensitivityRatios((firstMin - RATIO_STALE) * MIN, endMin * MIN),
   ]);
   const runs = ratios.map((r) => ({ minute: Math.floor(new Date(r.date).getTime() / MIN), ratio: r.ratio }));
   let run = -1;

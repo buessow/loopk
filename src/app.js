@@ -1,5 +1,4 @@
 import { EventEmitter } from 'node:events';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -22,39 +21,23 @@ import { logRequests } from './monitoring/requests.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-export async function createContext (config, pool) {
+export async function createContext (config, data) {
   const bus = new EventEmitter();
   bus.setMaxListeners(50);
-  const auth = new Auth(pool, config);
+  const auth = new Auth(data, config);
   await auth.init();
-  const ctx = { config, pool, bus, auth };
+  const ctx = { config, data, bus, auth };
   // The server to follow (Access page, or FOLLOW_URL). The server starts the
   // follower, ctx.follower; while there is one, the API refuses data changes.
   ctx.following = new Following(ctx, config.follow);
   await ctx.following.load();
   // The server starts the recorder, which predicts for each new reading.
-  ctx.models = new ModelStore(pool);
+  ctx.models = new ModelStore(data);
   ctx.predictions = new PredictionRecorder(ctx, ctx.models);
   // Sport mode: a profile percentage and temp target sent to AAPS.
   ctx.sport = new SportMode(ctx);
   await ctx.sport.load();
   return ctx;
-}
-
-/** Fails fast when setup-databases.sh has not applied every migration to this database. */
-export async function checkSchema (pool) {
-  const files = (await fs.readdir(path.join(root, 'migrations'))).filter((f) => f.endsWith('.sql'));
-  let applied = new Set();
-  try {
-    const { rows } = await pool.query('SELECT filename FROM schema_migrations');
-    applied = new Set(rows.map((r) => r.filename));
-  } catch (err) {
-    if (err.code !== '42P01') throw err;
-  }
-  const pending = files.filter((f) => !applied.has(f));
-  if (pending.length) {
-    throw new Error(`Database schema is not current (pending: ${pending.join(', ')}). Run ./setup-databases.sh.`);
-  }
 }
 
 export function createApp (ctx, { requestLog = false } = {}) {

@@ -4,7 +4,6 @@
 // AAPS uploads them, and AAPS applies them when it receives them (NSClient:
 // receive profile switches and temp targets).
 
-import { CollectionStore } from '../db/collection.js';
 import { resolveIdentifier } from '../api3/tools.js';
 
 const MIN = 60000;
@@ -47,9 +46,9 @@ export function baseSwitch (switches, now) {
 export class SportMode {
   constructor (ctx) {
     this.ctx = ctx;
-    this.pool = ctx.pool;
-    this.treatments = new CollectionStore(ctx.pool, 'treatments');
-    this.profiles = new CollectionStore(ctx.pool, 'profile');
+    this.data = ctx.data;
+    this.treatments = ctx.data.collection('treatments');
+    this.profiles = ctx.data.collection('profile');
     this.config = null; // { percentage, duration, target, profile, updatedAt, updatedBy }
   }
 
@@ -58,7 +57,7 @@ export class SportMode {
   }
 
   async load () {
-    const { rows: [r] } = await this.pool.query('SELECT * FROM sport_config');
+    const r = await this.data.sport.get();
     this.config = r
       ? { percentage: r.percentage, duration: r.duration, target: r.target, profile: r.profile, updatedAt: r.updated_at, updatedBy: r.updated_by }
       : null;
@@ -72,16 +71,12 @@ export class SportMode {
     if (profile != null) {
       if (typeof profile !== 'string' || !(await this.store())?.store?.[profile]) throw new Error(`There is no profile ${profile} in the profile store`);
     }
-    await this.pool.query(
-      `INSERT INTO sport_config (id, percentage, duration, target, profile, updated_by) VALUES (true, $1, $2, $3, $4, $5)
-       ON CONFLICT (id) DO UPDATE SET percentage = EXCLUDED.percentage, duration = EXCLUDED.duration, target = EXCLUDED.target,
-         profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-      [percentage, duration, target, profile, by || null]);
+    await this.data.sport.save({ percentage, duration, target, profile, by });
     await this.load();
   }
 
   async remove () {
-    await this.pool.query('DELETE FROM sport_config');
+    await this.data.sport.remove();
     await this.load();
   }
 

@@ -17,8 +17,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { MongoClient, ObjectId } from 'mongodb';
-import { SCHEMAS } from '../src/db/schema.js';
-import { splitDocument } from '../src/db/collection.js';
+import { SCHEMAS } from '../src/data/postgres/schema.js';
+import { splitDocument } from '../src/data/postgres/collection.js';
 
 const { values: args } = parseArgs({
   options: {

@@ -22,8 +22,7 @@ export class Following {
   }
 
   async read () {
-    const { rows } = await this.ctx.pool.query('SELECT * FROM follow_config');
-    const r = rows[0];
+    const r = await this.ctx.data.follow.get();
     this.setting = r
       ? { url: r.url, token: r.token, enabled: r.enabled, source: 'settings', updatedAt: r.updated_at, updatedBy: r.updated_by }
       : this.env && { url: normalizeUrl(this.env.url), token: this.env.token, enabled: true, source: 'environment' };
@@ -58,18 +57,14 @@ export class Following {
     if (!token) throw new Error('An access token on that server is needed');
     const next = this.follower({ url, token });
     if (enabled) await next.check();
-    await this.ctx.pool.query(
-      `INSERT INTO follow_config (id, url, token, enabled, updated_by) VALUES (true, $1, $2, $3, $4)
-       ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url, token = EXCLUDED.token, enabled = EXCLUDED.enabled,
-         updated_by = EXCLUDED.updated_by, updated_at = now()`,
-      [url, token, enabled, by || null]);
+    await this.ctx.data.follow.save({ url, token, enabled, by });
     await this.read();
     await this.replace(enabled ? next : null);
   }
 
   /** Forgets the saved server and stops following (FOLLOW_URL applies again, if set). */
   async remove () {
-    await this.ctx.pool.query('DELETE FROM follow_config');
+    await this.ctx.data.follow.remove();
     await this.read();
     await this.replace(this.setting?.enabled ? this.follower(this.setting) : null);
   }
@@ -82,7 +77,7 @@ export class Following {
 
   /** The setting and progress, for admins: never the token. */
   async view () {
-    const { rows } = await this.ctx.pool.query('SELECT collection, last_modified, source_url, updated_at FROM follow_state');
+    const rows = await this.ctx.data.follow.cursors();
     const s = this.setting;
     const f = this.ctx.follower;
     return {

@@ -17,7 +17,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { createPool } from '../src/db/index.js';
+import { createDataSource } from '../src/data/index.js';
 import { replay } from '../src/oref/replay.js';
 import { fromAapsPreferences } from '../src/oref/settings.js';
 
@@ -48,7 +48,7 @@ if (!process.env.DATABASE_URL) {
   console.error('DATABASE_URL is not set: run with --env-file=.env');
   process.exit(1);
 }
-const pool = createPool(process.env.DATABASE_URL);
+const data = createDataSource({ databaseUrl: process.env.DATABASE_URL });
 const to = args.to ? Date.parse(args.to) : Date.now();
 const from = to - Number(args.days) * 24 * 3600000;
 const pct = (n, d) => (d ? `${(100 * n / d).toFixed(1)}%` : '-');
@@ -56,7 +56,7 @@ const pct = (n, d) => (d ? `${(100 * n / d).toFixed(1)}%` : '-');
 try {
   const started = Date.now();
   const settings = args.settings ? fromAapsPreferences(readPreferences(args.settings)) : {};
-  const result = await replay(pool, { from, to, excludeDevices: args.exclude ? args.exclude.split(',') : [], recordedRatio: !args['rebuild-ratio'], settings });
+  const result = await replay(data, { from, to, excludeDevices: args.exclude ? args.exclude.split(',') : [], recordedRatio: !args['rebuild-ratio'], settings });
   console.log(`Runs from ${new Date(from).toISOString()} to ${new Date(to).toISOString()} in ${((Date.now() - started) / 1000).toFixed(1)} s`);
   console.log('Settings not from AAPS defaults:');
   for (const [k, source] of Object.entries(result.settings.sources)) {
@@ -74,5 +74,5 @@ try {
     console.log(`\nDetails: ${args.out}`);
   }
 } finally {
-  await pool.end();
+  await data.close();
 }

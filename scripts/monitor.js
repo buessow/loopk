@@ -1,9 +1,9 @@
-import { createPool } from '../src/db/index.js';
+import { createDataSource } from '../src/data/index.js';
 import { latestCollectionUpdates, reportFreshness } from '../src/monitoring/freshness.js';
 import { createStatsd } from '../src/monitoring/statsd.js';
 
 const intervalMs = Math.max(1000, Number(process.env.MONITOR_INTERVAL_MS) || 10000);
-const pool = createPool(process.env.DATABASE_URL);
+const data = createDataSource({ databaseUrl: process.env.DATABASE_URL });
 const metrics = createStatsd({
   host: process.env.STATSD_HOST || undefined,
   port: Number(process.env.STATSD_PORT) || undefined,
@@ -14,7 +14,7 @@ let wake;
 
 async function monitorOnce () {
   try {
-    const updates = await latestCollectionUpdates(pool);
+    const updates = await latestCollectionUpdates(data);
     reportFreshness(metrics, updates, previous);
   } catch (err) {
     console.error('Unable to query Loopk freshness', err);
@@ -50,6 +50,6 @@ try {
     if (!stopping) await wait(intervalMs);
   }
 } finally {
-  await pool.end();
+  await data.close();
   await metrics.close();
 }

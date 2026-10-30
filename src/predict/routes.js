@@ -30,7 +30,7 @@ export function createPredictionRoutes (ctx) {
   router.get('/', ctx.auth.require('api:entries:read', READ), h(async (req, res) => {
     const row = await store.current();
     if (!row) return res.json({ available: false, reason: 'no prediction model uploaded' });
-    const { readings, treatments } = await recentRecords(ctx.pool, row.model);
+    const { readings, treatments } = await recentRecords(ctx.data, row.model);
     res.json(predict(readings, { model: row.model, treatments }));
   }));
 
@@ -41,7 +41,7 @@ export function createPredictionRoutes (ctx) {
       return res.status(400).json({ status: 400, message: 'from and to must be times in ms, from before to' });
     }
     if (to - from > 32 * DAY) return res.status(400).json({ status: 400, message: 'at most 32 days at once' });
-    res.json(await recordedPredictions(ctx.pool, from, to));
+    res.json(await recordedPredictions(ctx.data, from, to));
   }));
 
   router.get('/model', ctx.auth.require('api:entries:read', READ), h(async (req, res) => {

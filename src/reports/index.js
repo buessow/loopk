@@ -7,7 +7,7 @@
 // predictions (src/predict/grid.js).
 
 import { treatmentGrid } from '../predict/grid.js';
-import { VALID_SGV, treatmentsBetween, zoneOffset } from '../predict/index.js';
+import { treatmentsBetween, zoneOffset } from '../predict/index.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -29,24 +29,6 @@ export const COLUMNS = [
   'bolus', 'basal', 'profileBasal', 'carbs', 'hrCount', 'hrSum',
 ];
 const COL = Object.fromEntries(COLUMNS.map((c, i) => [c, i]));
-
-const GLUCOSE_SQL = `
-  SELECT floor(extract(epoch FROM date) / 3600)::float8 AS h, count(*)::int AS n,
-         sum(sgv)::float8 AS s, sum(sgv::float8 * sgv) AS ss,
-         count(*) FILTER (WHERE sgv < 54)::int AS very_low,
-         count(*) FILTER (WHERE sgv >= 54 AND sgv < 70)::int AS low,
-         count(*) FILTER (WHERE sgv >= 70 AND sgv <= 180)::int AS target,
-         count(*) FILTER (WHERE sgv > 180 AND sgv <= 250)::int AS high,
-         count(*) FILTER (WHERE sgv > 250)::int AS very_high
-    FROM entries
-   WHERE ${VALID_SGV} AND date >= $1 AND date < $2
-   GROUP BY 1`;
-
-const HEARTRATE_SQL = `
-  SELECT floor(extract(epoch FROM date) / 3600)::float8 AS h, count(*)::int AS n, sum(beats_per_minute)::float8 AS s
-    FROM heartrate
-   WHERE date >= $1 AND date < $2 AND beats_per_minute BETWEEN 25 AND 250 AND is_valid IS DISTINCT FROM false
-   GROUP BY 1`;
 
 export function validTimeZone (timeZone) {
   try {
@@ -70,19 +52,18 @@ const within = (list, from, to) => (list || []).filter((r) => r.date >= from && 
  * first reading to now. Returns { columns, rows, from, to, timeZone } with
  * one row (see COLUMNS) for every hour, also the hours without readings.
  */
-export async function hourlyTotals (pool, { from, to, timeZone, now = Date.now() }) {
-  const { rows: [first] } = await pool.query(`SELECT min(date) AS date FROM entries WHERE ${VALID_SGV}`);
-  const start = first.date ? Math.max(from, new Date(first.date).getTime()) : Infinity;
+export async function hourlyTotals (data, { from, to, timeZone, now = Date.now() }) {
+  const first = await data.glucose.first();
+  const start = first != null ? Math.max(from, first) : Infinity;
   const fromH = Math.floor(start / HOUR);
   const toH = Math.ceil(Math.min(to, now) / HOUR);
   if (!(toH > fromH)) return { columns: COLUMNS, rows: [], from: null, to: null, timeZone };
 
-  const range = [new Date(fromH * HOUR), new Date(toH * HOUR)];
   // Temp basals and extended boluses started up to a day before still run.
   const [glucose, heartrate, treatments] = await Promise.all([
-    pool.query(GLUCOSE_SQL, range),
-    pool.query(HEARTRATE_SQL, range),
-    treatmentsBetween(pool, fromH * HOUR - DAY, toH * HOUR),
+    data.glucose.hourly(fromH * HOUR, toH * HOUR),
+    data.heartrate.hourly(fromH * HOUR, toH * HOUR),
+    treatmentsBetween(data, fromH * HOUR - DAY, toH * HOUR),
   ]);
 
   const zone = new Map();
@@ -99,7 +80,7 @@ export async function hourlyTotals (pool, { from, to, timeZone, now = Date.now()
     row[COL.offset] = offsetAt(h * 60);
     rows.push(row);
   }
-  for (const r of glucose.rows) {
+  for (const r of glucose) {
     const row = rows[r.h - fromH];
     row[COL.readings] = r.n;
     row[COL.sgvSum] = r.s;
@@ -110,7 +91,7 @@ export async function hourlyTotals (pool, { from, to, timeZone, now = Date.now()
     row[COL.high] = r.high;
     row[COL.veryHigh] = r.very_high;
   }
-  for (const r of heartrate.rows) {
+  for (const r of heartrate) {
     const row = rows[r.h - fromH];
     row[COL.hrCount] = r.n;
     row[COL.hrSum] = round(r.s, 1);

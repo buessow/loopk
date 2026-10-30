@@ -12,17 +12,17 @@ before(async () => {
 after(() => s.close());
 
 test('only admins, allow-listed and added accounts may sign in', async () => {
-  const { pool, config } = s.ctx;
-  const admin = await signInUser(pool, config, { email: 'Admin@Example.com', name: 'A' });
+  const { data, config } = s.ctx;
+  const admin = await signInUser(data, config, { email: 'Admin@Example.com', name: 'A' });
   assert.equal(admin.is_admin, true);
-  const friend = await signInUser(pool, config, { email: 'friend@example.com' });
+  const friend = await signInUser(data, config, { email: 'friend@example.com' });
   assert.equal(friend.is_admin, false);
-  assert.equal(await signInUser(pool, config, { email: 'stranger@example.com' }), null);
+  assert.equal(await signInUser(data, config, { email: 'stranger@example.com' }), null);
 });
 
 test('session cookie gives the web UI access to the API', async () => {
-  const { auth, pool, config } = s.ctx;
-  const user = await signInUser(pool, config, { email: 'friend@example.com' });
+  const { auth, data, config } = s.ctx;
+  const user = await signInUser(data, config, { email: 'friend@example.com' });
   const cookie = `${auth.sessionCookieName()}=${auth.signSession(user)}`;
 
   await request(s.app).get('/api/session').expect(401);
@@ -56,8 +56,8 @@ test('tokens read, or read and write, but never manage access', async () => {
 });
 
 test('admin manages tokens and people', async () => {
-  const { auth, pool, config } = s.ctx;
-  const user = await signInUser(pool, config, { email: 'admin@example.com' });
+  const { auth, data, config } = s.ctx;
+  const user = await signInUser(data, config, { email: 'admin@example.com' });
   const cookie = `${auth.sessionCookieName()}=${auth.signSession(user)}`;
 
   const created = await request(s.app).post('/api/v2/authorization/subjects').set('Cookie', cookie)
@@ -73,10 +73,10 @@ test('admin manages tokens and people', async () => {
 
   const added = await request(s.app).post('/api/admin/users').set('Cookie', cookie).send({ email: 'New@Example.com' }).expect(200);
   assert.equal(added.body.isAdmin, false);
-  assert.ok(await signInUser(pool, config, { email: 'new@example.com' }));
+  assert.ok(await signInUser(data, config, { email: 'new@example.com' }));
   // Made an admin by an admin; stays one when signing in again.
   await request(s.app).post('/api/admin/users').set('Cookie', cookie).send({ email: 'new@example.com', isAdmin: true }).expect(200);
-  assert.equal((await signInUser(pool, config, { email: 'new@example.com' })).is_admin, true);
+  assert.equal((await signInUser(data, config, { email: 'new@example.com' })).is_admin, true);
   // An admin cannot lock themselves out.
   await request(s.app).post('/api/admin/users').set('Cookie', cookie).send({ email: 'admin@example.com', isAdmin: false }).expect(409);
   await request(s.app).delete('/api/admin/users/admin@example.com').set('Cookie', cookie).expect(409);

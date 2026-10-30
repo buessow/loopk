@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { CollectionStore, BadFilterError, REMOVED } from '../db/collection.js';
+import { BadFilterError, REMOVED } from '../data/index.js';
 import {
   HTTP, MSG, ResponseSent, sendJSON, sendStatus, parseDate, floorSeconds, resolveIdentifier,
   validateUpdate, validateCommon, projector, render, isNumberInString, API3_MAX_LIMIT,
@@ -29,7 +29,7 @@ export class Collection {
   constructor ({ ctx, colName }) {
     this.ctx = ctx;
     this.colName = colName;
-    this.storage = new CollectionStore(ctx.pool, colName);
+    this.storage = ctx.data.collection(colName);
   }
 
   // --- helpers ---------------------------------------------------------------

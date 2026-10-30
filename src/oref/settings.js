@@ -172,18 +172,7 @@ function modeOf (list) {
   return [...counts].sort((a, b) => b[1] - a[1])[0][0];
 }
 
-// The newest configuration AAPS uploaded at or before a time.
-const CONFIGURATION = `SELECT configuration_insulin AS insulin, aps_configuration AS aps_settings,
-     sensitivity_configuration AS sensitivity_settings
-   FROM devicestatus WHERE date <= $1 AND configuration_aps IS NOT NULL AND is_valid IS DISTINCT FROM false
-   ORDER BY date DESC LIMIT 1`;
-// Reasons that name a limit, which a short period may not show.
-const LIMIT_REASONS = `SELECT suggested_reason AS reason FROM devicestatus
-   WHERE date > $1 AND date <= $2 AND suggested_reason ~ 'max_iob [1-9]|maxSafeBasal' AND is_valid IS DISTINCT FROM false
-   ORDER BY date DESC LIMIT 2000`;
 const LIMIT_DAYS = 90;
-const STORED = `SELECT DISTINCT ON (setting) setting, value FROM loop_settings
-   WHERE valid_from <= $1 ORDER BY setting, valid_from DESC`;
 
 // AAPS's preference keys (core/keys: DoubleKey, IntKey, BooleanKey,
 // UnitDoubleKey) for the settings above.
@@ -274,20 +263,18 @@ export function validSetting (key, value) {
 }
 
 /** The settings entered in loopk that hold at `at` (ms): { key: value }. */
-export async function storedSettings (pool, at) {
-  const { rows } = await pool.query(STORED, [new Date(at)]);
+export async function storedSettings (data, at) {
+  const rows = await data.loopSettings.at(at);
   return Object.fromEntries(rows.filter((r) => validSetting(r.setting, r.value)).map((r) => [r.setting, r.value]));
 }
 
 /** Stores `values` ({ key: value }) as holding from `validFrom` (ms). */
-export async function saveSettings (pool, values, { validFrom, by = null }) {
+export async function saveSettings (data, values, { validFrom, by = null }) {
   for (const [key, value] of Object.entries(values)) {
     if (!validSetting(key, value)) throw new Error(`Not a loop setting value: ${key} = ${JSON.stringify(value)}`);
   }
   for (const [key, value] of Object.entries(values)) {
-    await pool.query(`INSERT INTO loop_settings (setting, value, valid_from, updated_by) VALUES ($1, $2, $3, $4)
-      ON CONFLICT (setting, valid_from) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`,
-    [key, JSON.stringify(value), new Date(validFrom), by]);
+    await data.loopSettings.save(key, value, validFrom, by);
   }
 }
 
@@ -296,11 +283,11 @@ export async function saveSettings (pool, values, { validFrom, by = null }) {
  * (loadRuns, the recent ones), the limits reasons named in the 90 days
  * before and AAPS's defaults. Returns { values, sources }.
  */
-export async function loadSettings (pool, { to, runs = [], tempTargets = [], entered = true }) {
-  const [{ rows: [config] }, { rows: limits }, stored] = await Promise.all([
-    pool.query(CONFIGURATION, [new Date(to)]),
-    pool.query(LIMIT_REASONS, [new Date(to - LIMIT_DAYS * 24 * 3600000), new Date(to)]),
-    entered ? storedSettings(pool, to) : {},
+export async function loadSettings (data, { to, runs = [], tempTargets = [], entered = true }) {
+  const [config, limits, stored] = await Promise.all([
+    data.loop.configuration(to),
+    data.loop.limitReasons(to - LIMIT_DAYS * 24 * 3600000, to),
+    entered ? storedSettings(data, to) : {},
   ]);
   const settings = inferSettings(config, [...runs, ...limits.map((r) => ({ reason: r.reason, console: [] }))], { tempTargets });
   return withEntered(settings, stored);
@@ -320,13 +307,11 @@ function withEntered (settings, stored) {
  * the entered ones that hold at each time. Returns { at(t): { values,
  * sources }, last: the settings at `to` }.
  */
-export async function loadSettingsTimeline (pool, { from, to, runs = [], tempTargets = [] }) {
-  const inferred = await loadSettings(pool, { to, runs, tempTargets, entered: false });
-  const { rows } = await pool.query('SELECT DISTINCT valid_from FROM loop_settings WHERE valid_from > $1 AND valid_from <= $2 ORDER BY valid_from',
-    [new Date(from), new Date(to)]);
-  const starts = [from, ...rows.map((r) => r.valid_from.getTime())];
+export async function loadSettingsTimeline (data, { from, to, runs = [], tempTargets = [] }) {
+  const inferred = await loadSettings(data, { to, runs, tempTargets, entered: false });
+  const starts = [from, ...await data.loopSettings.changes(from, to)];
   const segments = [];
-  for (const start of starts) segments.push({ start, settings: withEntered(inferred, await storedSettings(pool, start)) });
+  for (const start of starts) segments.push({ start, settings: withEntered(inferred, await storedSettings(data, start)) });
   return {
     at (t) {
       let s = segments[0];

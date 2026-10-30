@@ -9,7 +9,7 @@ const MAX_MISSES_WINDOW = 366 * DAY;
 /** GET /api/analysis/misses?from=&to=: see below. */
 export function createAnalysisRoutes (ctx) {
   const router = express.Router();
-  const { auth, pool } = ctx;
+  const { auth, data } = ctx;
   const read = [
     auth.require('api:entries:read', READ),
     auth.require('api:treatments:read', READ),
@@ -25,7 +25,7 @@ export function createAnalysisRoutes (ctx) {
       const from = req.query.from ? Number(req.query.from) : to - 30 * DAY;
       if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return fail(res, 400, 'from and to must be times in ms, from before to');
       if (to - from > MAX_MISSES_WINDOW) return fail(res, 400, `Search at most ${MAX_MISSES_WINDOW / DAY} days at once`);
-      res.json({ from, to, misses: await findMisses(pool, { from, to }) });
+      res.json({ from, to, misses: await findMisses(data, { from, to }) });
     } catch (err) {
       next(err);
     }

@@ -30,7 +30,7 @@ const HOUR = 3600000;
  */
 export function createSimulateRoutes (ctx) {
   const router = express.Router();
-  const { auth, pool } = ctx;
+  const { auth, data } = ctx;
   const read = ['api:entries:read', 'api:treatments:read', 'api:devicestatus:read'].map((p) => auth.require(p, READ));
   const json = express.json({ limit: '16kb' });
   const h = (fn) => async (req, res, next) => {
@@ -50,7 +50,7 @@ export function createSimulateRoutes (ctx) {
 
   router.post('/run', ...read, json, h(async (req, res) => {
     const body = req.body || {};
-    res.json(await simulateRun(pool, { time: time(body.time, 'time'), changes: parseChanges(body.changes) }));
+    res.json(await simulateRun(data, { time: time(body.time, 'time'), changes: parseChanges(body.changes) }));
   }));
 
   router.post('/period', ...read, json, h(async (req, res) => {
@@ -60,15 +60,15 @@ export function createSimulateRoutes (ctx) {
     if (!(from < to)) throw new SimulationError('from must be before to');
     if (to - from > MAX_PERIOD) throw new SimulationError(`At most ${MAX_PERIOD / 24 / HOUR} days at once`);
     if (body.k != null && !(typeof body.k === 'number' && body.k > 0 && body.k <= 3)) throw new SimulationError('k must be a number above 0, at most 3');
-    res.json(await simulatePeriod(pool, { from, to: Math.min(to, Date.now()), changes: parseChanges(body.changes), k: body.k ?? undefined }));
+    res.json(await simulatePeriod(data, { from, to: Math.min(to, Date.now()), changes: parseChanges(body.changes), k: body.k ?? undefined }));
   }));
 
   router.get('/settings', ...read, h(async (req, res) => {
     const at = req.query.at ? time(req.query.at, 'at') : Date.now();
-    const history = await loadHistory(pool, { from: at - HOUR, to: at });
-    const settings = await loadSettings(pool, { to: at, tempTargets: history.tempTargets });
+    const history = await loadHistory(data, { from: at - HOUR, to: at });
+    const settings = await loadSettings(data, { to: at, tempTargets: history.tempTargets });
     const profile = history.profiles.at(-1) || null;
-    const [stored, test] = await Promise.all([loadProfileStore(pool, at), loadTestProfile(pool)]);
+    const [stored, test] = await Promise.all([loadProfileStore(data, at), loadTestProfile(data)]);
     const profiles = [...(test ? [TEST_PROFILE] : []), ...stored.map((p) => p.name).filter((n) => n !== TEST_PROFILE)];
     res.json({ at, ...settings, defaults: DEFAULTS, profile: profile && { ...profile, timeZone: undefined }, profiles });
   }));
@@ -77,7 +77,7 @@ export function createSimulateRoutes (ctx) {
   // store (which a copy can go into) with inStore, then those known only
   // from AAPS's profile switches
   router.get('/test-profile', ...read, h(async (req, res) => {
-    const [test, doc, known] = await Promise.all([loadTestProfile(pool), newestStore(pool), loadProfileStore(pool, Date.now())]);
+    const [test, doc, known] = await Promise.all([loadTestProfile(data), newestStore(data), loadProfileStore(data, Date.now())]);
     const inStore = Object.entries(doc?.store || {}).map(([name, p]) => ({ ...fromStore(name, p), inStore: true }));
     const others = known.filter((p) => !doc?.store?.[p.name]).map((p) => ({ ...p, inStore: false }));
     res.json({ name: TEST_PROFILE, profile: test, stores: [...inStore, ...others], defaultProfile: doc?.defaultProfile ?? null, storeDate: doc?.date ?? null, follows: ctx.follower?.url ?? null });
@@ -94,7 +94,7 @@ export function createSimulateRoutes (ctx) {
   }));
 
   router.delete('/test-profile', admin, h(async (req, res) => {
-    await deleteTestProfile(pool);
+    await deleteTestProfile(data);
     res.json({ name: TEST_PROFILE, profile: null });
   }));
 
@@ -107,8 +107,8 @@ export function createSimulateRoutes (ctx) {
     }
     const validFrom = body.validFrom != null ? time(body.validFrom, 'validFrom') : Date.now();
     const a = await auth.fromRequest(req);
-    await saveSettings(pool, values, { validFrom, by: a.user?.email ?? a.subject?.name ?? null });
-    res.json(await loadSettings(pool, { to: Math.max(validFrom, Date.now()) }));
+    await saveSettings(data, values, { validFrom, by: a.user?.email ?? a.subject?.name ?? null });
+    res.json(await loadSettings(data, { to: Math.max(validFrom, Date.now()) }));
   }));
 
   return router;

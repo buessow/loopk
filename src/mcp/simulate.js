@@ -61,8 +61,8 @@ function decision (d, units) {
 }
 
 /** simulate_run: one recorded decision again with changes. */
-export async function run (pool, { time, changes, units, timeZone, publicUrl }) {
-  const r = await simulateRun(pool, { time, changes: toolChanges(changes, units) });
+export async function run (data, { time, changes, units, timeZone, publicUrl }) {
+  const r = await simulateRun(data, { time, changes: toolChanges(changes, units) });
   return {
     units,
     time: localTime(r.time, timeZone),
@@ -89,8 +89,8 @@ function stats (s, units) {
 }
 
 /** simulate_period: a period dosed with changes, glucose estimated. */
-export async function period (pool, { from, to, changes, k, units, timeZone, publicUrl }) {
-  const r = await simulatePeriod(pool, { from, to, changes: toolChanges(changes, units), k });
+export async function period (data, { from, to, changes, k, units, timeZone, publicUrl }) {
+  const r = await simulatePeriod(data, { from, to, changes: toolChanges(changes, units), k });
   if (r.error) throw new SimulationError(r.error, 422);
   const miss = (m) => ({ kind: m.kind, start: localTime(m.start, timeZone), end: localTime(m.end, timeZone), glucose: glucose(m.glucose, units) });
   return {
@@ -116,9 +116,9 @@ export async function period (pool, { from, to, changes, k, units, timeZone, pub
  * get_loop_settings: the AAPS settings at a time, where each came from, and
  * AAPS's defaults; as the algorithm takes them (glucose in mg/dL).
  */
-export async function settings (pool, { at, timeZone }) {
-  const history = await loadHistory(pool, { from: at - HOUR, to: at });
-  const s = await loadSettings(pool, { to: at, tempTargets: history.tempTargets });
+export async function settings (data, { at, timeZone }) {
+  const history = await loadHistory(data, { from: at - HOUR, to: at });
+  const s = await loadSettings(data, { to: at, tempTargets: history.tempTargets });
   return { at: localTime(at, timeZone), values: s.values, sources: s.sources, defaults: DEFAULTS };
 }
 
@@ -152,8 +152,8 @@ export function profileView (p, units) {
 const profilesLink = (publicUrl) => (publicUrl ? `${publicUrl}/profiles` : null);
 
 /** get_test_profile: the test profile, or that there is none yet. */
-export async function testProfile (pool, { units, timeZone, publicUrl }) {
-  const p = await loadTestProfile(pool);
+export async function testProfile (data, { units, timeZone, publicUrl }) {
+  const p = await loadTestProfile(data);
   if (!p) return { name: TEST_PROFILE, exists: false, note: `There is no ${TEST_PROFILE} profile yet: set_test_profile creates it from a stored profile.` };
   return {
     name: TEST_PROFILE,
@@ -172,11 +172,11 @@ export async function testProfile (pool, { units, timeZone, publicUrl }) {
  * default the test profile as it is, else the profile switched to last),
  * with the schedules and DIA given replaced. Glucose values in `units`.
  */
-export async function setTestProfile (pool, args, { units, timeZone, publicUrl, by }) {
-  const current = await loadTestProfile(pool);
+export async function setTestProfile (data, args, { units, timeZone, publicUrl, by }) {
+  const current = await loadTestProfile(data);
   let base = current;
   if (args.based_on || !current) {
-    const stored = await loadProfileStore(pool, Date.now());
+    const stored = await loadProfileStore(data, Date.now());
     base = args.based_on ? stored.find((p) => p.name === args.based_on) : stored[0];
     if (!base) throw new SimulationError(args.based_on ? `No stored profile named ${args.based_on}` : 'No stored profile to start from');
   }
@@ -204,6 +204,6 @@ export async function setTestProfile (pool, args, { units, timeZone, publicUrl, 
     targetHigh: args.target_high ? schedule(args.target_high, 'target_high', toProfile) : base.targetHigh,
   };
   const basedOn = args.based_on ?? current?.basedOn ?? base.name ?? null;
-  await saveTestProfile(pool, { profile, basedOn, note: args.note ?? current?.note ?? null }, by);
-  return testProfile(pool, { units, timeZone, publicUrl });
+  await saveTestProfile(data, { profile, basedOn, note: args.note ?? current?.note ?? null }, by);
+  return testProfile(data, { units, timeZone, publicUrl });
 }

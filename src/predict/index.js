@@ -320,95 +320,25 @@ export function treatmentMinutes (model) {
 // can arrive alongside the real sensor's (public/model.js keeps the same list).
 export const SIMULATED_SOURCES = ['Random'];
 
-/** SQL condition for the entries that are glucose readings the model uses. */
-export const VALID_SGV = `type = 'sgv' AND sgv BETWEEN ${SGV_MIN} AND ${SGV_MAX} AND date IS NOT NULL AND is_valid IS DISTINCT FROM false`
-  + ` AND coalesce(device, '') NOT IN (${SIMULATED_SOURCES.map((d) => `'${d}'`).join(', ')})`;
-
 const reading = (r) => ({
   date: new Date(r.date).getTime(),
   sgv: r.sgv,
   ...(r.utc_offset != null ? { utcOffset: r.utc_offset } : {}),
 });
 
-const VALID = 'is_valid IS DISTINCT FROM false';
-const schedule = () => `json_agg(json_build_array(coalesce(s.seconds, extract(epoch FROM s.time::time)::int), s.value) ORDER BY s.position)`;
-
-// The treatments buildInputs uses, as modelling/glupred/load.py reads them,
-// for from <= date < to ($1, $2); stored profiles before `to` ($1).
-const TREATMENT_QUERIES = {
-  boluses: `SELECT date, insulin::float8 AS insulin FROM treatments
-     WHERE insulin > 0 AND date >= $1 AND date < $2 AND ${VALID}
-       AND coalesce(type, '') NOT IN ('PRIMING', 'FAKE_EXTENDED') AND coalesce(event_type, '') <> 'Combo Bolus'
-     ORDER BY date`,
-  // Extended boluses on top of the basal; those a FAKE_EXTENDED temp basal
-  // emulates are part of its rate.
-  extended: `SELECT c.date, c.entered_insulin::float8 AS insulin, c.duration::float8 AS duration FROM treatments c
-     WHERE c.event_type = 'Combo Bolus' AND c.entered_insulin > 0 AND c.duration > 0
-       AND c.date >= $1 AND c.date < $2 AND c.${VALID}
-       AND NOT coalesce(c.is_emulating_temp_basal, false)
-       AND NOT EXISTS (SELECT 1 FROM treatments f
-                        WHERE f.type = 'FAKE_EXTENDED' AND f.extended_emulated->>'identifier' = c.identifier
-                          AND f.date BETWEEN c.date - interval '1 day' AND c.date + interval '1 day')
-     ORDER BY c.date`,
-  tempBasals: `SELECT date, coalesce(duration_in_milliseconds, duration * 60000)::float8 AS duration_ms,
-       coalesce(absolute, rate)::float8 AS rate, percent::float8 AS percent FROM treatments
-     WHERE event_type = 'Temp Basal' AND date >= $1 AND date < $2 AND ${VALID}
-     ORDER BY date`,
-  carbs: `SELECT date, carbs::float8 AS carbs FROM treatments
-     WHERE carbs > 0 AND date >= $1 AND date < $2 AND ${VALID}
-     ORDER BY date`,
-  // From the last permanent switch before the window: it sets the profile
-  // that the later ones go back to.
-  profileSwitches: `SELECT t.date, t.profile, coalesce(t.percentage, 100)::float8 AS percentage,
-       coalesce(t.timeshift, 0)::float8 AS timeshift, coalesce(t.duration, 0)::float8 AS duration,
-       (SELECT ${schedule()} FROM treatment_profile_schedules s
-         WHERE s.treatment_identifier = t.identifier AND s.kind = 'basal') AS schedule
-     FROM treatments t
-     WHERE t.event_type = 'Profile Switch' AND t.date < $2 AND t.${VALID}
-       AND t.date >= coalesce((SELECT max(date) FROM treatments WHERE event_type = 'Profile Switch'
-                                  AND coalesce(duration, 0) = 0 AND date <= $1 AND ${VALID}), '-infinity')
-     ORDER BY t.date`,
-  profileStores: `SELECT p.date, p.default_profile, s.name, ${schedule()} AS schedule
-     FROM profile p JOIN profile_store_schedules s ON s.profile_identifier = p.identifier
-     WHERE s.kind = 'basal' AND p.date IS NOT NULL AND p.date < $1 AND p.${VALID}
-     GROUP BY p.identifier, p.date, p.default_profile, s.name
-     ORDER BY p.date`,
-};
-
-const ms = (d) => new Date(d).getTime();
-const TREATMENT_ROWS = {
-  boluses: (r) => ({ date: ms(r.date), insulin: r.insulin }),
-  extended: (r) => ({ date: ms(r.date), insulin: r.insulin, duration: r.duration }),
-  tempBasals: (r) => ({ date: ms(r.date), durationMs: r.duration_ms, rate: r.rate, percent: r.percent }),
-  carbs: (r) => ({ date: ms(r.date), carbs: r.carbs }),
-  profileSwitches: (r) => ({
-    date: ms(r.date), profile: r.profile, percentage: r.percentage, timeshift: r.timeshift, duration: r.duration, schedule: r.schedule,
-  }),
-  profileStores: (r) => ({ date: ms(r.date), defaultProfile: r.default_profile, name: r.name, schedule: r.schedule }),
-};
-
 /** Treatments with from <= date < to (ms), as buildInputs takes them; profiles also from before. */
-export async function treatmentsBetween (pool, from, to) {
-  const entries = await Promise.all(Object.entries(TREATMENT_QUERIES).map(async ([key, sql]) => {
-    const params = key === 'profileStores' ? [new Date(to)] : [new Date(from), new Date(to)];
-    const { rows } = await pool.query(sql, params);
-    return [key, rows.map(TREATMENT_ROWS[key])];
-  }));
-  return Object.fromEntries(entries);
+export function treatmentsBetween (data, from, to) {
+  return data.treatments.forModel(from, to);
 }
 
 /** Readings with from <= date <= to (ms), oldest first. */
-export async function readingsBetween (pool, from, to) {
-  const { rows } = await pool.query(
-    `SELECT date, sgv, utc_offset FROM entries WHERE ${VALID_SGV} AND date >= $1 AND date <= $2 ORDER BY date`,
-    [new Date(from), new Date(to)]);
-  return rows.map(reading);
+export async function readingsBetween (data, from, to) {
+  return (await data.glucose.upTo(from, to)).map(reading);
 }
 
 /** Date (ms) of the newest reading, or null. */
-export async function newestReading (pool) {
-  const { rows: [r] } = await pool.query(`SELECT max(date) AS date FROM entries WHERE ${VALID_SGV}`);
-  return r.date ? new Date(r.date).getTime() : null;
+export function newestReading (data) {
+  return data.glucose.newest();
 }
 
 /**
@@ -416,14 +346,14 @@ export async function newestReading (pool) {
  * treatments before it that buildInputs uses, plus `pastMinutes` more for
  * the predictions made that much earlier. Returns { readings, treatments }.
  */
-export async function recentRecords (pool, model, pastMinutes = 30) {
-  const newest = await newestReading(pool);
+export async function recentRecords (data, model, pastMinutes = 30) {
+  const newest = await newestReading(data);
   if (newest == null) return { readings: [], treatments: {} };
   const slotMs = model.slotMinutes * MIN;
   const [readings, treatments] = await Promise.all([
-    readingsBetween(pool, newest - (historyMinutes(model) + pastMinutes) * MIN, newest),
+    readingsBetween(data, newest - (historyMinutes(model) + pastMinutes) * MIN, newest),
     treatmentMinutes(model)
-      ? treatmentsBetween(pool, newest - (treatmentMinutes(model) + pastMinutes) * MIN, (Math.floor(newest / slotMs) + 1) * slotMs)
+      ? treatmentsBetween(data, newest - (treatmentMinutes(model) + pastMinutes) * MIN, (Math.floor(newest / slotMs) + 1) * slotMs)
       : {},
   ]);
   return { readings, treatments };

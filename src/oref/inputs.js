@@ -343,9 +343,8 @@ export class Replayer {
   }
 }
 
-// --- loading from the database --------------------------------------------
+// --- loading from the data source --------------------------------------------
 
-const VALID = 'is_valid IS DISTINCT FROM false';
 const ms = (d) => (d == null ? null : new Date(d).getTime());
 
 /**
@@ -353,41 +352,12 @@ const ms = (d) => (d == null ? null : new Date(d).getTime());
  * treatments from 8 days before (TDD and DIA). `excludeDevices`: reading
  * sources to leave out.
  */
-export async function loadHistory (pool, { from, to, excludeDevices = [] }) {
-  const start = new Date(from - 8 * 24 * HOUR);
-  const end = new Date(to + 2 * MIN);
-  const q = (sql, params = [start, end]) => pool.query(sql, params).then((r) => r.rows);
-  const [readings, boluses, temps, carbs, eps, schedules, targets, events] = await Promise.all([
-    q(`SELECT date, sgv::float8 AS sgv, device FROM entries
-        WHERE type = 'sgv' AND sgv IS NOT NULL AND date >= $1 AND date <= $2 AND ${VALID}
-          AND NOT (coalesce(device, '') = ANY($3))
-        ORDER BY date`, [new Date(from - (READINGS_HOURS + 1) * HOUR), end, excludeDevices]),
-    q(`SELECT date, insulin::float8 AS insulin, (type = 'SMB' OR coalesce(is_smb, false)) AS smb FROM treatments
-        WHERE insulin > 0 AND date >= $1 AND date <= $2 AND ${VALID}
-          AND coalesce(type, '') NOT IN ('PRIMING', 'FAKE_EXTENDED') AND coalesce(event_type, '') <> 'Combo Bolus'
-        ORDER BY date`),
-    q(`SELECT date, coalesce(duration_in_milliseconds, duration * 60000)::float8 AS duration_ms,
-          coalesce(absolute, rate)::float8 AS rate, percent::float8 AS percent, srv_created, utc_offset FROM treatments
-        WHERE event_type = 'Temp Basal' AND date >= $1 AND date <= $2 AND ${VALID}
-        ORDER BY date`),
-    q(`SELECT date, carbs::float8 AS carbs, srv_created FROM treatments
-        WHERE carbs > 0 AND date >= $1 AND date <= $2 AND ${VALID} ORDER BY date`),
-    q(`SELECT t.identifier, t.date, t.original_profile_name AS name, coalesce(t.original_percentage, 100)::float8 AS percentage, p.dia::float8 AS dia, p.units, p.timezone
-        FROM treatments t JOIN treatment_profiles p ON p.treatment_identifier = t.identifier
-        WHERE t.event_type = 'Note' AND t.original_profile_name IS NOT NULL AND t.${VALID}
-          AND t.date <= $2 AND t.date >= coalesce((SELECT max(date) FROM treatments
-            WHERE event_type = 'Note' AND original_profile_name IS NOT NULL AND date <= $1 AND ${VALID}), '-infinity')
-        ORDER BY t.date`),
-    q(`SELECT s.treatment_identifier AS id, s.kind, coalesce(s.seconds, extract(epoch FROM s.time::time)::int) AS seconds, s.value::float8 AS value
-        FROM treatment_profile_schedules s JOIN treatments t ON t.identifier = s.treatment_identifier
-        WHERE t.event_type = 'Note' AND t.original_profile_name IS NOT NULL AND t.date <= $2
-          AND t.date >= coalesce((SELECT max(date) FROM treatments
-            WHERE event_type = 'Note' AND original_profile_name IS NOT NULL AND date <= $1 AND is_valid IS DISTINCT FROM false), '-infinity')
-        ORDER BY s.treatment_identifier, s.kind, s.position`),
-    q(`SELECT date, coalesce(duration, 0)::float8 AS duration, target_bottom::float8 AS low, target_top::float8 AS high, units
-        FROM treatments WHERE event_type = 'Temporary Target' AND date >= $1 AND date <= $2 AND ${VALID} ORDER BY date`),
-    q(`SELECT date, event_type, coalesce(duration, 0)::float8 AS duration FROM treatments
-        WHERE event_type IN ('Site Change', 'Profile Switch') AND date >= $1 AND date <= $2 AND ${VALID} ORDER BY date`),
+export async function loadHistory (data, { from, to, excludeDevices = [] }) {
+  const start = from - 8 * 24 * HOUR;
+  const end = to + 2 * MIN;
+  const [readings, { boluses, temps, carbs, eps, schedules, targets, events }] = await Promise.all([
+    data.glucose.forReplay(from - (READINGS_HOURS + 1) * HOUR, end, excludeDevices),
+    data.treatments.forReplay(start, end),
   ]);
 
   const byId = new Map();
@@ -460,20 +430,8 @@ export async function loadHistory (pool, { from, to, excludeDevices = [] }) {
 }
 
 /** The recorded loop runs in [from, to], one per run time, oldest first. */
-export async function loadRuns (pool, { from, to }) {
-  const { rows } = await pool.query(`SELECT DISTINCT ON (suggested_deliver_at) date, suggested_deliver_at AS deliver_at,
-      suggested_algorithm AS algorithm, suggested_running_dynamic_isf AS dynamic_isf,
-      suggested_bg::float8 AS bg, suggested_eventual_bg::float8 AS eventual_bg, suggested_target_bg::float8 AS target_bg,
-      suggested_insulin_req::float8 AS insulin_req, suggested_carbs_req::float8 AS carbs_req,
-      suggested_cob::float8 AS cob, suggested_iob::float8 AS iob, suggested_rate::float8 AS rate,
-      suggested_duration::float8 AS duration, suggested_units::float8 AS units,
-      suggested_sensitivity_ratio::float8 AS sensitivity_ratio, suggested_variable_sens::float8 AS variable_sens,
-      suggested_tick AS tick, suggested_reason AS reason,
-      coalesce(suggested_console_error, '{}') AS console_error, coalesce(suggested_console_log, '{}') AS console_log,
-      configuration_version AS version
-    FROM devicestatus
-    WHERE date >= $1 AND date <= $2 AND ${VALID} AND suggested_bg IS NOT NULL AND suggested_deliver_at IS NOT NULL
-    ORDER BY suggested_deliver_at, date`, [new Date(from), new Date(to)]);
+export async function loadRuns (data, { from, to }) {
+  const rows = await data.loop.forReplay(from, to);
   return rows.map((r) => ({
     timestamp: Date.parse(r.deliver_at),
     algorithm: r.algorithm,

@@ -1,18 +1,18 @@
 import http from 'node:http';
 import { loadConfig } from './config.js';
-import { createPool } from './db/index.js';
-import { createApp, createContext, checkSchema } from './app.js';
+import { createDataSource } from './data/index.js';
+import { createApp, createContext } from './app.js';
 import { attachSockets } from './sockets.js';
 
 const config = loadConfig();
-const pool = createPool(config.databaseUrl);
+const data = createDataSource(config);
 
 try {
   if (config.authDisabled && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(config.baseUrl)) {
     throw new Error('AUTH_DISABLED is only allowed when BASE_URL is http://localhost.');
   }
-  await checkSchema(pool);
-  const ctx = await createContext(config, pool);
+  await data.checkSchema();
+  const ctx = await createContext(config, data);
   const app = createApp(ctx, { requestLog: true });
   const server = http.createServer(app);
   attachSockets(server, ctx);
@@ -28,13 +28,13 @@ try {
   const shutdown = async () => {
     await ctx.following.stop();
     await ctx.predictions.stop();
-    server.close(() => pool.end().then(() => process.exit(0)));
+    server.close(() => data.close().then(() => process.exit(0)));
     setTimeout(() => process.exit(0), 5000).unref();
   };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 } catch (err) {
   console.error(err.message || err);
-  await pool.end();
+  await data.close();
   process.exit(1);
 }

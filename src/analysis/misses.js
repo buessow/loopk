@@ -6,12 +6,10 @@
 //   glucose stayed far below the peak, or a limit held its insulin back.
 // Glucose, targets and ISF are in mg/dL as AAPS reports them.
 
-import { VALID_SGV } from '../predict/index.js';
 import { uniqueRuns } from './guide.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
-const VALID = 'is_valid IS DISTINCT FROM false';
 const ms = (d) => (d == null ? null : new Date(d).getTime());
 
 export const DEFAULTS = {
@@ -54,31 +52,6 @@ const LIMITS = [
   ['maxBasal', /\bmaxSafeBasal:?\s+(\d+(?:\.\d+)?)/],
   ['smbOff', /SMB disabled|disabling SMB/i],
 ];
-
-const READINGS = `SELECT date, sgv::float8 AS sgv FROM entries
-   WHERE ${VALID_SGV} AND date >= $1 AND date < $2 ORDER BY date`;
-// Every reading AAPS had, deleted and simulated ones too, for the doubled-values check.
-const READING_TIMES = `SELECT date FROM entries
-   WHERE type = 'sgv' AND date >= $1 AND date < $2 ORDER BY date`;
-const TREATMENTS = `SELECT date, insulin::float8 AS insulin, carbs::float8 AS carbs,
-     coalesce(type = 'SMB' OR is_smb, false) AS smb
-   FROM treatments
-   WHERE date >= $1 AND date < $2 AND ${VALID} AND (insulin > 0 OR carbs > 0)
-     AND coalesce(type, '') <> 'PRIMING'
-   ORDER BY date`;
-const RUNS = `SELECT date,
-     coalesce(enacted_bg, suggested_bg)::float8 AS bg,
-     coalesce(enacted_eventual_bg, suggested_eventual_bg)::float8 AS eventual_bg,
-     coalesce(enacted_target_bg, suggested_target_bg)::float8 AS target_bg,
-     coalesce(enacted_insulin_req, suggested_insulin_req)::float8 AS insulin_req,
-     coalesce(enacted_iob, suggested_iob, iob_iob)::float8 AS iob,
-     coalesce(enacted_cob, suggested_cob)::float8 AS cob,
-     coalesce(enacted_variable_sens, suggested_variable_sens)::float8 AS isf,
-     coalesce(enacted_reason, suggested_reason) AS reason
-   FROM devicestatus
-   WHERE date >= $1 AND date < $2 AND ${VALID}
-     AND (suggested_bg IS NOT NULL OR enacted_bg IS NOT NULL)
-   ORDER BY date`;
 
 /**
  * Stretches of readings at or beyond a threshold: below `low` until back
@@ -352,17 +325,15 @@ export function loopMisses ({ readings, treatments, runs, readingTimes }, option
 }
 
 /** loopMisses over [from, to) (ms), with records from before `from` the lookback needs. */
-export async function findMisses (pool, { from, to }, options = {}) {
-  const start = new Date(from - DEFAULTS.lowLookback - HOUR);
-  const end = new Date(to);
-  const [readings, treatments, runs, times] = await Promise.all([
-    pool.query(READINGS, [start, end]),
-    pool.query(TREATMENTS, [start, end]),
-    pool.query(RUNS, [start, end]),
-    pool.query(READING_TIMES, [start, end]),
+export async function findMisses (data, { from, to }, options = {}) {
+  const start = from - DEFAULTS.lowLookback - HOUR;
+  const [readings, treatments, runs, readingTimes] = await Promise.all([
+    data.glucose.between(start, to),
+    data.treatments.forMisses(start, to),
+    data.loop.forMisses(start, to),
+    data.glucose.allTimes(start, to),
   ]);
   const dated = (rows) => rows.map((r) => ({ ...r, date: ms(r.date) }));
-  const readingTimes = times.rows.map((r) => ms(r.date));
-  return loopMisses({ readings: dated(readings.rows), treatments: dated(treatments.rows), runs: dated(runs.rows), readingTimes }, options)
+  return loopMisses({ readings: readings.map((r) => ({ date: ms(r.date), sgv: r.sgv })), treatments: dated(treatments), runs: dated(runs), readingTimes }, options)
     .filter((m) => m.start >= from);
 }

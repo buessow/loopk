@@ -7,7 +7,7 @@
 //   node --env-file=.env scripts/remove-simulated.js [--apply] [--permanent]
 
 import { parseArgs } from 'node:util';
-import { createPool } from '../src/db/index.js';
+import { createPool } from '../src/data/postgres/pool.js';
 import { SIMULATED_SOURCES } from '../src/predict/index.js';
 
 const { values: args } = parseArgs({

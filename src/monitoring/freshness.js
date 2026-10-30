@@ -17,12 +17,9 @@ function timestampMs (value) {
 }
 
 /** Return the most recent source timestamp for each collection. */
-export async function latestCollectionUpdates (pool) {
-  return Promise.all(MONITORED_COLLECTIONS.map(async ({ collection, column }) => {
-    // Collection and column come only from MONITORED_COLLECTIONS above.
-    const { rows: [row] } = await pool.query(`SELECT MAX(${column}) AS timestamp FROM ${collection}`);
-    return { collection, timestamp: timestampMs(row.timestamp) };
-  }));
+export async function latestCollectionUpdates (data) {
+  return Promise.all(MONITORED_COLLECTIONS.map(async ({ collection, column }) => (
+    { collection, timestamp: timestampMs(await data.latest(collection, column)) })));
 }
 
 /**

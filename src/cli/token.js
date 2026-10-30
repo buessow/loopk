@@ -6,14 +6,14 @@
 //   npm run token -- list
 //   npm run token -- delete <name>
 import { loadConfig } from '../config.js';
-import { createPool } from '../db/index.js';
+import { createDataSource } from '../data/index.js';
 import { Auth } from '../auth/index.js';
 
 const [cmd, name, access = 'readwrite'] = process.argv.slice(2);
 const describe = (s) => `${s.name} [${s.can_upload_model ? 'upload model' : s.can_write ? 'read/write' : 'read'}]: ${s.access_token}`;
 const config = loadConfig();
-const pool = createPool(config.databaseUrl);
-const auth = new Auth(pool, config);
+const data = createDataSource(config);
+const auth = new Auth(data, config);
 
 try {
   await auth.init();
@@ -29,5 +29,5 @@ try {
     process.exitCode = 2;
   }
 } finally {
-  await pool.end();
+  await data.close();
 }
