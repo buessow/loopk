@@ -48,7 +48,7 @@ if (!process.env.DATABASE_URL) {
   console.error('DATABASE_URL is not set: run with --env-file=.env');
   process.exit(1);
 }
-const data = createDataSource({ databaseUrl: process.env.DATABASE_URL });
+const data = await createDataSource({ databaseUrl: process.env.DATABASE_URL });
 const to = args.to ? Date.parse(args.to) : Date.now();
 const from = to - Number(args.days) * 24 * 3600000;
 const pct = (n, d) => (d ? `${(100 * n / d).toFixed(1)}%` : '-');

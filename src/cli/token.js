@@ -12,7 +12,7 @@ import { Auth } from '../auth/index.js';
 const [cmd, name, access = 'readwrite'] = process.argv.slice(2);
 const describe = (s) => `${s.name} [${s.can_upload_model ? 'upload model' : s.can_write ? 'read/write' : 'read'}]: ${s.access_token}`;
 const config = loadConfig();
-const data = createDataSource(config);
+const data = await createDataSource(config);
 const auth = new Auth(data, config);
 
 try {

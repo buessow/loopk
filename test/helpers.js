@@ -16,9 +16,10 @@ const DATA_TABLES = [
  */
 export async function startServer (env = {}) {
   const databaseUrl = process.env.TEST_DATABASE_URL;
-  if (!databaseUrl) throw new Error('TEST_DATABASE_URL is not set: run ./setup-db-users.sh --local && ./setup-databases.sh --target=local');
-  const config = loadConfig({ DATABASE_URL: databaseUrl, ADMIN_EMAILS: 'admin@example.com', ...env });
-  const data = createDataSource(config);
+  const dataSource = process.env.TEST_DATA_SOURCE || 'postgres';
+  if (!databaseUrl && dataSource === 'postgres') throw new Error('TEST_DATABASE_URL is not set: run ./setup-db-users.sh --local && ./setup-databases.sh --target=local');
+  const config = loadConfig({ DATABASE_URL: databaseUrl, DATA_SOURCE: dataSource, ADMIN_EMAILS: 'admin@example.com', ...env });
+  const data = await createDataSource(config);
   await data.checkSchema();
   await data.pool.query(`TRUNCATE ${DATA_TABLES.join(', ')}`);
   const ctx = await createContext(config, data);

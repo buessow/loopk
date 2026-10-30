@@ -3,7 +3,7 @@ import { latestCollectionUpdates, reportFreshness } from '../src/monitoring/fres
 import { createStatsd } from '../src/monitoring/statsd.js';
 
 const intervalMs = Math.max(1000, Number(process.env.MONITOR_INTERVAL_MS) || 10000);
-const data = createDataSource({ databaseUrl: process.env.DATABASE_URL });
+const data = await createDataSource({ databaseUrl: process.env.DATABASE_URL });
 const metrics = createStatsd({
   host: process.env.STATSD_HOST || undefined,
   port: Number(process.env.STATSD_PORT) || undefined,

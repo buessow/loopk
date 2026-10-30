@@ -10,6 +10,10 @@ export function loadConfig (env = process.env) {
   return {
     port,
     baseUrl,
+    // postgres (DATABASE_URL), or memory: an empty database in this process, lost on exit.
+    dataSource: env.DATA_SOURCE || 'postgres',
+    // For DATA_SOURCE nightscout: the server to read, and an access token on it.
+    nightscout: { url: env.NIGHTSCOUT_URL || '', token: env.NIGHTSCOUT_TOKEN || '' },
     databaseUrl: env.DATABASE_URL || 'postgres://localhost/loopkdev',
     google: {
       clientId: env.GOOGLE_CLIENT_ID || '',

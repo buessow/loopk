@@ -5,7 +5,7 @@ import { createApp, createContext } from './app.js';
 import { attachSockets } from './sockets.js';
 
 const config = loadConfig();
-const data = createDataSource(config);
+const data = await createDataSource(config);
 
 try {
   if (config.authDisabled && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(config.baseUrl)) {
@@ -17,8 +17,11 @@ try {
   const server = http.createServer(app);
   attachSockets(server, ctx);
   if (config.follow && !config.follow.token) console.warn('FOLLOW_URL needs FOLLOW_TOKEN, an access token on that server: not following it.');
-  ctx.following.start();
-  ctx.predictions.start();
+  // A source over another server (DATA_SOURCE nightscout) neither follows nor records predictions.
+  if (!data.upstream) {
+    ctx.following.start();
+    ctx.predictions.start();
+  }
   server.listen(config.port, () => {
     console.log(`Loopk listening on ${config.baseUrl} (port ${config.port})`);
     if (config.authDisabled) console.warn('AUTH_DISABLED: the web UI is open to anyone who can reach this port, as admin.');

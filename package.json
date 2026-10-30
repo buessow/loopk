@@ -19,6 +19,7 @@
     "migrate:mongo": "node --env-file-if-exists=.env scripts/mongo-migrate.js"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.5.10",
     "@modelcontextprotocol/sdk": "1.32.1",
     "cookie-parser": "^1.4.7",
     "express": "^4.22.3",

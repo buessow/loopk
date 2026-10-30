@@ -81,6 +81,8 @@ The app's database roles can only read and write rows. Schema changes go in a ne
 | Variable | |
 | --- | --- |
 | `DATABASE_URL` | Postgres connection (written by `setup-db-users.sh`) |
+| `DATA_SOURCE` | `postgres` (default, `DATABASE_URL`), `memory` (an empty database in the process, lost on exit) or `nightscout` (see below) |
+| `NIGHTSCOUT_URL`, `NIGHTSCOUT_TOKEN` | With `DATA_SOURCE=nightscout`: the server to read, and an access token on it (read is enough) |
 | `PORT`, `BASE_URL` | Listen port; public URL (used for the Google callback; `https://` enables secure cookies) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth client (type "Web application") with redirect URI `<BASE_URL>/auth/google/callback` |
 | `ADMIN_EMAILS` | Google accounts that sign in as admin (can manage tokens and people on `/admin`) |
@@ -102,9 +104,13 @@ The app's database roles can only read and write rows. Schema changes go in a ne
 3. **Follow** the Nightscout server until you switch AAPS over: set `FOLLOW_URL` to its URL and `FOLLOW_TOKEN` to a read access token there. Loopk then copies every change (API v3 history, nudged by its `/storage` socket), starting where the migration ended, and its own API refuses data changes. Without a migration it copies everything through the API, which is slow for years of data.
 4. **Switch**: point AAPS (NSClient V3) at Loopk with a read & write token from `/admin`, and remove `FOLLOW_URL`.
 
+## Without a database
+
+With `DATA_SOURCE=nightscout`, Loopk keeps nothing: it reads the Nightscout server (or another Loopk) at `NIGHTSCOUT_URL` through API v3 into an in-memory Postgres (PGlite) and answers from there with the same queries (`src/data/nightscout/`). It loads what each request needs: the time ranges it reads, and profile switches back from a time until the one in effect; a longer period fetches only the days missing. Changes on that server are read at most once a minute. Sport mode and copying a profile write to that server; Loopk's own API accepts no changes. Two lookups are narrower than with Postgres: limits named in the loop's reasons come from the last 2 days (not 90), and the simulator lists the profiles switched to in the last 60 days (not a year). Access tokens, people and settings live in memory and are lost on restart.
+
 ## Tests
 
-`npm test` runs against `TEST_DATABASE_URL` (the `loopk_test` database).
+`npm test` runs against `TEST_DATABASE_URL` (the `loopk_test` database); with `TEST_DATA_SOURCE=memory` it runs against an in-memory database instead, which needs no Postgres.
 
 ## Production deployment
 
