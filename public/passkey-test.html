@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Passkey test — loopk</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/app.css">
+<script>
+(function () {
+  var theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+  try { var o = JSON.parse(localStorage.getItem('loopk.theme')); if (o && o.system === theme) theme = o.theme; } catch (e) {}
+  document.documentElement.dataset.theme = theme;
+})();
+</script>
+<style>
+  .pk { max-width: 720px; margin: 0 auto; padding: var(--space-5) var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
+  .pk-step { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+  .pk-step h3 { margin: 0; font-size: 15px; }
+  .pk-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+  .pk-row .input { flex: 1 1 220px; }
+  .pk-log { margin: 0; padding: var(--space-3); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--color-divider); min-height: 6em; }
+  .pk-ok { color: var(--bg-ok, green); }
+  .pk-bad { color: var(--color-danger, #c92a2a); }
+</style>
+</head>
+<body>
+<main class="pk">
+  <div>
+    <div class="stat-kicker">loopk · test</div>
+    <h2 style="margin:0">Passkey token vault</h2>
+    <p class="text-muted" style="margin:var(--space-2) 0 0">Checks whether this device can keep an access token encrypted with a passkey. The passkey's PRF extension gives a secret only it can produce again; the token is encrypted with it and kept in this browser. Nothing is sent to the server. Use a made-up token: this page is only a test.</p>
+  </div>
+
+  <section class="blueprint pk-step"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <h3>0 · This browser</h3>
+    <div id="support" class="text-muted">Checking…</div>
+  </section>
+
+  <section class="blueprint pk-step"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <h3>1 · Create a passkey</h3>
+    <p class="text-muted" style="margin:0">Creates a passkey named "loopk token (test)" for this site, in your password manager (iCloud Keychain, Google Password Manager, …). You can delete it there afterwards.</p>
+    <div class="pk-row"><button class="btn btn-primary" type="button" id="create">Create passkey</button><span id="createStatus"></span></div>
+  </section>
+
+  <section class="blueprint pk-step"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <h3>2 · Encrypt a token</h3>
+    <div class="pk-row">
+      <input class="input mono" id="token" value="test-token-0123456789" aria-label="Token to encrypt" spellcheck="false">
+      <button class="btn btn-primary" type="button" id="seal">Unlock and encrypt</button>
+    </div>
+    <span id="sealStatus"></span>
+  </section>
+
+  <section class="blueprint pk-step"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <h3>3 · Decrypt it again</h3>
+    <p class="text-muted" style="margin:0">Reload the page first (or come back later) to check that it works from what the browser kept.</p>
+    <div class="pk-row"><button class="btn btn-primary" type="button" id="open">Unlock and decrypt</button><span id="openStatus"></span></div>
+  </section>
+
+  <section class="blueprint pk-step"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <h3>Log</h3>
+    <pre class="pk-log mono" id="log"></pre>
+    <div class="pk-row">
+      <button class="btn btn-secondary" type="button" id="copyLog">Copy log</button>
+      <button class="btn btn-ghost" type="button" id="forget">Forget the stored vault</button>
+    </div>
+  </section>
+</main>
+<script type="module" src="/passkey-test.js"></script>
+</body>
+</html>
