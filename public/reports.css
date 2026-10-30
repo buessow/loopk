@@ -128,14 +128,12 @@
 .simulate-misses .miss-time { color: var(--color-neutral-600); }
 .miss-fate { font-size: 11px; padding: 0 6px; border-radius: var(--radius-sm); border: 1px solid var(--color-divider); color: var(--color-neutral-700); }
 .miss-fate-gone { color: var(--bg-ok); border-color: currentColor; }
-.test-profile { padding: var(--space-4) var(--space-6); display: flex; flex-direction: column; gap: var(--space-3); }
-.test-profile[hidden] { display: none; }
-.test-profile-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3); }
-.test-profile-head h4 { margin: 0; }
-.test-profile-note { margin: 0; white-space: pre-wrap; }
-.test-profile-note:empty { display: none; }
-.test-profile-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
-.test-profile-tools [hidden] { display: none; }
-.test-profile-table td { font-variant-numeric: tabular-nums; }
-.test-profile-table td.differs { background: color-mix(in srgb, var(--chart-simulated) 12%, transparent); }
+/* the AI Test profile on the profiles page: red, apart from the profile's own lines */
+:root { --chart-test: #e03131; }
+[data-theme="night"] { --chart-test: #ff6b6b; }
+.test-toggle { display: inline-flex; align-items: center; gap: var(--space-1); font-size: 13px; cursor: pointer; }
+.test-toggle[hidden] { display: none; }
+.test-meta { margin: var(--space-1) 0; font-size: 12px; white-space: pre-wrap; }
+.test-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-top: var(--space-2); font-size: 13px; }
+.profile-chart.profile-delta { height: 220px; }
 .miss-fate-new { color: var(--chart-simulated); border-color: currentColor; }

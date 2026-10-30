@@ -141,7 +141,7 @@ test('a stored profile can stand in for the one recorded', async () => {
   await run({ profile: { name: 'Nope' } }).expect(400);
 });
 
-test('the AI Test profile is simulated with, and an admin copies it into a profile of the store', async () => {
+test('the AI Test profile is simulated with, and an admin copies it into a profile', async () => {
   await run({ profile: { name: 'AI Test' } }).expect(400);
   const flat = (v) => [[0, v]];
   await saveTestProfile(s.ctx.pool, {
@@ -157,6 +157,7 @@ test('the AI Test profile is simulated with, and an admin copies it into a profi
   const view = (await request(s.app).get('/api/simulate/test-profile').set(auth(reader)).expect(200)).body;
   assert.equal(view.profile.note, 'weaker ISF');
   assert.deepEqual(view.stores.map((p) => [p.name, p.inStore]), [['Half', true], ['Default', false]]);
+  assert.equal(view.follows, null);
 
   // only admins copy, into a profile the store has
   await request(s.app).post('/api/simulate/test-profile/copy').set(auth(reader)).send({ to: 'Half' }).expect(403);
@@ -168,6 +169,13 @@ test('the AI Test profile is simulated with, and an admin copies it into a profi
   assert.deepEqual(doc.store.Half.sens, [{ time: '00:00', timeAsSeconds: 0, value: 100 }]);
   assert.deepEqual(doc.store.Half.basal, [{ time: '00:00', timeAsSeconds: 0, value: 0.8 }]);
   assert.equal(doc.store.Half.timezone, 'UTC');
+  // a profile known only from a switch is added to the store, the others kept
+  await request(s.app).post('/api/simulate/test-profile/copy').set('Cookie', cookie).send({ to: 'Default' }).expect(200);
+  const added = (await request(s.app).get('/api/v3/profile?sort$desc=date&limit=1').set(auth(reader)).expect(200)).body.result[0];
+  assert.deepEqual(Object.keys(added.store).sort(), ['Default', 'Half']);
+  assert.equal(added.store.Default.dia, 6);
+  assert.deepEqual(added.store.Default.sens, [{ time: '00:00', timeAsSeconds: 0, value: 100 }]);
+  assert.equal(added.store.Default.timezone, 'UTC');
 
   await request(s.app).delete('/api/simulate/test-profile').set('Cookie', cookie).expect(200);
   assert.equal((await request(s.app).get('/api/simulate/test-profile').set(auth(reader)).expect(200)).body.profile, null);

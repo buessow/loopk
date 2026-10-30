@@ -5,10 +5,10 @@
 /* global Chart */
 
 import { PERIODS, periodRange } from './reports-model.js';
-import { chartSeries, combinePcts, rowSummary } from './profiles-model.js';
+import { chartSeries, combinePcts, hourlyProfile, rowSummary } from './profiles-model.js';
 import { clearCache } from './browser-cache.js';
 import { setupTheme } from './theme.js';
-import { compareDefault, compareRows } from './testprofile-model.js';
+import { testDelta } from './testprofile-model.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -143,7 +143,8 @@ function renderTable () {
       const ratio = state.series.has('ratio')
         ? `<h4 class="profile-chart-title">Sensitivity ratio (above 1: less sensitive, more basal)</h4><div class="profile-chart profile-ratio"><canvas aria-label="Sensitivity ratio under ${label} by hour of day"></canvas></div>`
         : '';
-      html += `<tr class="profile-detail"><td colspan="${COLUMNS}">${seg}${toggles}<h4 class="profile-chart-title">Basal and boluses</h4><div class="profile-chart"><canvas aria-label="Basal of ${label} by hour of day"></canvas></div>${ratio}</td></tr>`;
+      const aiTest = testShown() ? testDetail(p) : '';
+      html += `<tr class="profile-detail"><td colspan="${COLUMNS}">${seg}${toggles}<h4 class="profile-chart-title">Basal and boluses</h4><div class="profile-chart"><canvas aria-label="Basal of ${label} by hour of day"></canvas></div>${aiTest}${ratio}</td></tr>`;
     }
     html += '</tbody>';
     table.insertAdjacentHTML('beforeend', html);
@@ -213,11 +214,13 @@ function drawCharts (profile, body) {
   const profileColor = cssColor('--color-text');
   const basal = [
     ...(on('profile') ? [line('Profile 100%', s.profile, profileColor, { stepped: 'middle', series: 'profile' })] : []),
+    ...(testShown() ? [line('AI Test', hourlyProfile(test.view.profile.basal), cssColor('--chart-test'), { stepped: 'middle', order: -1 })] : []),
     ...(on('pcts') ? s.adjusted.map((a) => line(`Profile ${a.pct}%`, a.values, profileColor, { stepped: 'middle', borderDash: [5, 4], borderWidth: 1.5, series: 'pcts' })) : []),
     ...(on('basal') ? bandSets('basal', 'Delivered basal', s.basal, cssColor('--chart-basal')) : []),
     ...(on('bolus') ? bandSets('bolus', 'SMB/bolus', s.bolus, cssColor('--chart-bolus')) : []),
   ];
   charts.set(profile.key, hourChart(body.querySelector('.profile-chart canvas'), basal, { unit: 'U/h', title: 'U/h' }));
+  if (testShown()) drawTestDelta(profile, body);
 
   const canvas = body.querySelector('.profile-ratio canvas');
   if (!canvas) return;
@@ -230,35 +233,61 @@ function drawCharts (profile, body) {
 
 // --- the AI Test profile -----------------------------------------------------
 
-const test = { view: null, compare: null, isAdmin: false };
+// The AI Test profile an agent wrote (GET /api/simulate/test-profile), shown
+// on the expanded profiles when `show` is on; `status` is the message after
+// a copy or delete, for the profile `key` it was made on.
+const test = { view: null, show: storedTestShown(), isAdmin: false, status: null };
 
-function testStatus (text, warn = false) {
-  $('testProfileStatus').textContent = text;
-  $('testProfileStatus').hidden = !text;
-  $('testProfileStatus').classList.toggle('tag-warn', warn);
+function storedTestShown () {
+  try { return localStorage.getItem('loopk.profilesTest') === '1'; } catch { return false; }
 }
 
-function renderTestProfile () {
-  const v = test.view;
-  const p = v?.profile;
-  $('testProfile').hidden = !p;
-  if (!p) return;
-  const when = new Date(p.updatedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  $('testProfileMeta').textContent = `${p.basedOn ? `from ${p.basedOn}, ` : ''}written ${when}${p.updatedBy ? ` by ${p.updatedBy}` : ''}`;
-  $('testProfileNote').textContent = p.note || '';
-  const names = v.stores.map((s) => s.name);
-  if (!names.includes(test.compare)) test.compare = compareDefault(v);
-  $('testProfileCompare').innerHTML = v.stores.map((s) => `<option value="${esc(s.name)}"${s.name === test.compare ? ' selected' : ''}>${esc(s.name)}${s.inStore ? '' : ' (not in the profile store)'}</option>`).join('');
-  $('testProfileCompare').disabled = !names.length;
-  const other = v.stores.find((s) => s.name === test.compare) || null;
-  $('testProfileCopy').hidden = !test.isAdmin || !other?.inStore;
-  if (test.isAdmin && other && !other.inStore && !$('testProfileStatus').classList.contains('tag-warn')) testStatus(`${other.name} isn't in the profile store AAPS uploaded: it can't be copied into.`);
-  $('testProfileCopy').textContent = other ? `Copy into ${other.name}` : 'Copy into this profile';
-  $('testProfileDelete').hidden = !test.isAdmin;
-  $('testProfileAdminNote').hidden = !test.isAdmin;
-  $('testProfileTable').innerHTML = `<thead><tr><th>Schedule</th><th>AI Test</th><th>${esc(other?.name ?? '–')}</th></tr></thead><tbody>`
-    + compareRows(p, other).map(([label, a, b, differs]) => `<tr><th>${esc(label)}</th><td${differs ? ' class="differs"' : ''}>${esc(a)}</td><td>${esc(b)}</td></tr>`).join('')
-    + '</tbody>';
+const testShown = () => test.show && !!test.view?.profile;
+
+function renderTestToggle () {
+  const exists = !!test.view?.profile;
+  $('testToggleWrap').hidden = !exists;
+  $('testToggle').checked = test.show;
+  $('testNote').hidden = !testShown();
+  $('testAdminNote').hidden = !test.isAdmin;
+}
+
+/** The store entry of the profile named `name` (ISF, carb ratio, targets, DIA), or null. */
+const storeOf = (name) => test.view?.stores?.find((s) => s.name === name) || null;
+
+/** The AI Test part of an expanded profile: what it is, the difference chart and the buttons. */
+function testDetail (p) {
+  const t = test.view.profile;
+  const other = storeOf(p.name);
+  const label = esc(p.name || 'the profile');
+  const when = new Date(t.updatedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const meta = `AI Test${t.basedOn ? `, from ${t.basedOn}` : ''}, written ${when}${t.updatedBy ? ` by ${t.updatedBy}` : ''}. DIA ${num(t.dia, 1)} h${other ? ` (${p.name}: ${num(other.dia, 1)} h)` : ''}.${t.note ? `\n${t.note}` : ''}`;
+  const status = test.status?.key === p.key ? `<span class="tag${test.status.warn ? ' tag-warn' : ''}" role="status">${esc(test.status.text)}</span>` : '';
+  const adds = !other?.inStore;
+  const follows = test.view.follows;
+  const copy = !test.isAdmin || !p.name ? ''
+    : follows ? `<span class="text-muted">This server follows ${esc(follows)} and changes no profiles. Copy there: an agent writes the AI Test with that server's MCP tools, and you copy it on its Profiles page.</span>`
+    : `<button type="button" class="btn btn-primary" data-copy="${esc(p.name)}" data-adds="${adds}" data-key="${esc(p.key)}">Copy into ${label}</button>`
+      + (adds ? `<span class="text-muted">AAPS has only reported switching to ${label}; its last profile store doesn't list it. Copying adds ${label} there.</span>` : '');
+  const remove = test.isAdmin ? `<button type="button" class="btn btn-ghost" data-delete-test data-key="${esc(p.key)}">Delete AI Test</button>` : '';
+  return `<h4 class="profile-chart-title">AI Test against ${label} (% above)</h4><p class="test-meta">${esc(meta)}</p>`
+    + `<div class="profile-chart profile-delta"><canvas aria-label="How much the AI Test profile is above ${label} by hour of day"></canvas></div>`
+    + `<div class="test-tools">${copy}${remove}${status}</div>`;
+}
+
+function drawTestDelta (profile, body) {
+  const canvas = body.querySelector('.profile-delta canvas');
+  if (!canvas) return;
+  const d = testDelta(test.view.profile, profile.schedule, storeOf(profile.name));
+  const step = { stepped: 'middle' };
+  const sets = [
+    line('No difference', d.basal.map(() => 0), cssColor('--color-text'), { borderDash: [5, 4], borderWidth: 1, order: 1 }),
+    line('Basal', d.basal, cssColor('--chart-test'), { ...step, order: -1 }),
+    line('ISF', d.isf, cssColor('--chart-ratio'), step),
+    line('Carb ratio', d.ic, cssColor('--chart-carbs'), step),
+    line('Low target', d.target, cssColor('--color-neutral-600'), { ...step, borderDash: [2, 3] }),
+  ];
+  charts.set(`${profile.key}:test`, hourChart(canvas, sets, { unit: '%', title: '% above', beginAtZero: false, digits: 0 }));
 }
 
 async function loadTestProfile () {
@@ -268,34 +297,38 @@ async function loadTestProfile () {
     test.view = null;
     console.error(err);
   }
-  renderTestProfile();
+  renderTestToggle();
 }
 
 function wireTestProfile () {
-  $('testProfileCompare').addEventListener('change', (e) => {
-    test.compare = e.target.value;
-    testStatus('');
-    renderTestProfile();
+  $('testToggle').addEventListener('change', (e) => {
+    test.show = e.target.checked;
+    try { localStorage.setItem('loopk.profilesTest', test.show ? '1' : '0'); } catch { /* private mode */ }
+    renderTestToggle();
+    renderTable();
   });
-  $('testProfileCopy').addEventListener('click', async () => {
-    const to = test.compare;
-    if (!to || !confirm(`Replace the schedules and DIA of ${to} with those of AI Test? This writes a new profile store, which AAPS receives.`)) return;
+  $('profiles').addEventListener('click', async (e) => {
+    const copy = e.target.closest('[data-copy]');
+    const remove = e.target.closest('[data-delete-test]');
+    if (!copy && !remove) return;
+    const key = (copy || remove).dataset.key;
     try {
-      await call('/api/simulate/test-profile/copy', { method: 'POST', body: { to, utcOffset: -new Date().getTimezoneOffset() } });
+      if (copy) {
+        const to = copy.dataset.copy;
+        const what = copy.dataset.adds === 'true' ? `Add ${to}, with the schedules and DIA of AI Test, to the profile store?` : `Replace the schedules and DIA of ${to} with those of AI Test?`;
+        if (!confirm(`${what} This writes a new profile store, which AAPS receives.`)) return;
+        await call('/api/simulate/test-profile/copy', { method: 'POST', body: { to, utcOffset: -new Date().getTimezoneOffset() } });
+        test.status = { key, text: `Copied into ${to}. Check on the phone that the profile store arrived, then switch to ${to}.` };
+      } else {
+        if (!confirm('Delete the AI Test profile? Agents can write it again.')) return;
+        await call('/api/simulate/test-profile', { method: 'DELETE' });
+        test.status = null;
+      }
       await loadTestProfile();
-      testStatus(`Copied into ${to}. Check on the phone that the profile store arrived, then switch to ${to}.`);
     } catch (err) {
-      testStatus(err.message, true);
+      test.status = { key, text: err.message, warn: true };
     }
-  });
-  $('testProfileDelete').addEventListener('click', async () => {
-    if (!confirm('Delete the AI Test profile? Agents can write it again.')) return;
-    try {
-      await call('/api/simulate/test-profile', { method: 'DELETE' });
-      await loadTestProfile();
-    } catch (err) {
-      testStatus(err.message, true);
-    }
+    renderTable();
   });
 }
 
@@ -388,7 +421,8 @@ async function main () {
   renderControls();
   wire();
   wireTestProfile();
-  await Promise.all([load(), loadTestProfile()]);
+  await loadTestProfile();
+  await load();
 }
 
 main().catch((err) => setStatus(err.message, true));

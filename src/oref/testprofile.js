@@ -12,7 +12,7 @@
 import { resolveIdentifier } from '../api3/tools.js';
 import { CollectionStore } from '../db/collection.js';
 import { MMOLL_TO_MGDL } from './format.js';
-import { SimulationError } from './simulate.js';
+import { SimulationError, loadProfileStore } from './simulate.js';
 
 export const TEST_PROFILE = 'AI Test';
 const DAY_SECONDS = 86400;
@@ -119,15 +119,23 @@ function convert (list, from, to) {
 /**
  * Copies the test profile into the profile `to` of the newest profile store
  * document: a new document with that profile's schedules and DIA replaced,
- * in its units, the other profiles kept. Returns the new document.
+ * in its units, the other profiles kept. A profile known only from AAPS's
+ * profile switches (such as one made on the phone) is added to the store,
+ * with the other settings of the store's default profile. Returns the new
+ * document.
  */
 export async function copyTestProfile (ctx, { to, by, now = Date.now(), utcOffset = 0 }) {
   if (ctx.follower) throw new SimulationError(`This server follows ${ctx.follower.url} and accepts no changes`, 409);
   const test = await loadTestProfile(ctx.pool);
   if (!test) throw new SimulationError(`There is no ${TEST_PROFILE} profile to copy`, 404);
-  const doc = await newestStore(ctx.pool);
-  const target = doc?.store?.[to];
-  if (!target) throw new SimulationError(`There is no profile ${to} in the profile store`, 404);
+  const doc = await newestStore(ctx.pool) || { store: {} };
+  let target = doc.store?.[to];
+  if (!target) {
+    const known = await loadProfileStore(ctx.pool, now);
+    if (!known.some((p) => p.name === to)) throw new SimulationError(`There is no profile ${to}`, 404);
+    const { units, timezone, carbs_hr: carbsHr, delay } = doc.store?.[doc.defaultProfile] || Object.values(doc.store || {})[0] || {};
+    target = { units: units || test.units, timezone: timezone || test.timezone || 'UTC', ...(carbsHr != null ? { carbs_hr: carbsHr } : {}), ...(delay != null ? { delay } : {}) };
+  }
   const units = target.units || doc.units || test.units;
   const entry = { ...target, dia: test.dia };
   for (const [kind, key] of Object.entries(KINDS)) {
@@ -135,6 +143,7 @@ export async function copyTestProfile (ctx, { to, by, now = Date.now(), utcOffse
   }
   const { identifier, _id, srvCreated, srvModified, ...rest } = doc;
   const copy = {
+    defaultProfile: to,
     ...rest,
     date: now,
     created_at: new Date(now).toISOString(),

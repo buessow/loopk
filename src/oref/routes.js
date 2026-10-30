@@ -24,7 +24,8 @@ const HOUR = 3600000;
  * GET /api/simulate/test-profile: the "AI Test" profile agents edit
  *   (testprofile.js) and the profiles of the newest profile store.
  * POST /api/simulate/test-profile/copy { to }: copies it into that profile
- *   of the store, which AAPS then receives (admins).
+ *   of the store (adding a profile known only from switches), which AAPS
+ *   then receives (admins).
  * DELETE /api/simulate/test-profile: removes it (admins).
  */
 export function createSimulateRoutes (ctx) {
@@ -79,7 +80,7 @@ export function createSimulateRoutes (ctx) {
     const [test, doc, known] = await Promise.all([loadTestProfile(pool), newestStore(pool), loadProfileStore(pool, Date.now())]);
     const inStore = Object.entries(doc?.store || {}).map(([name, p]) => ({ ...fromStore(name, p), inStore: true }));
     const others = known.filter((p) => !doc?.store?.[p.name]).map((p) => ({ ...p, inStore: false }));
-    res.json({ name: TEST_PROFILE, profile: test, stores: [...inStore, ...others], defaultProfile: doc?.defaultProfile ?? null, storeDate: doc?.date ?? null });
+    res.json({ name: TEST_PROFILE, profile: test, stores: [...inStore, ...others], defaultProfile: doc?.defaultProfile ?? null, storeDate: doc?.date ?? null, follows: ctx.follower?.url ?? null });
   }));
 
   const admin = auth.require(MANAGE_ACCESS, 'Only admins may change profiles.');

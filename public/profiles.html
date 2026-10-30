@@ -36,26 +36,10 @@
       <span>–</span>
       <input class="input" type="date" id="periodTo" aria-label="To">
     </span>
+    <label class="test-toggle" id="testToggleWrap" hidden><input type="checkbox" id="testToggle"> Show the AI Test profile</label>
     <span class="tag" id="status" role="status">Loading…</span>
   </section>
 
-  <section class="blueprint test-profile" id="testProfile" hidden><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-    <div class="test-profile-head">
-      <h4>AI Test</h4>
-      <span class="tag">not on the phone</span>
-      <span class="text-muted" id="testProfileMeta"></span>
-    </div>
-    <p class="test-profile-note" id="testProfileNote"></p>
-    <p class="text-muted report-note">The profile an AI agent wrote through loopk's MCP tools to simulate with. It stays in loopk: AAPS never receives it. Each row is a schedule, from the time of day given until the next; differences from the profile picked are marked. <span id="testProfileAdminNote" hidden><b>Copy into</b> writes a new profile store in which that profile has these schedules and DIA, the other profiles unchanged. AAPS takes it with "Receive profile store" on in its NSClient settings; it is used once you switch to that profile.</span></p>
-    <div class="test-profile-tools">
-      <label for="testProfileCompare">Compare with</label>
-      <select class="input" id="testProfileCompare"></select>
-      <button type="button" class="btn btn-primary" id="testProfileCopy" hidden>Copy into this profile</button>
-      <button type="button" class="btn btn-ghost" id="testProfileDelete" hidden>Delete AI Test</button>
-      <span class="tag" id="testProfileStatus" role="status" hidden></span>
-    </div>
-    <div class="profiles-table-wrap"><table class="table test-profile-table" id="testProfileTable"></table></div>
-  </section>
   <p class="text-muted report-note">One row per basal profile (name and schedule; an edited schedule is a new row), with one indented row per manual percentage set by a profile switch. <b>Active</b>: hours it was in effect in the period, and their share of the period (%). <b>Insulin</b>, <b>Basal</b>, <b>SMB/bolus</b>: units delivered meanwhile; basal comes from the profile and the loop's temp basals. <b>Per day</b>: insulin per 24 h in effect. <b>Sensitivity ratio</b>: the loop's mean ratio (autosens or dynamic ISF) while in effect. Above 1 means less sensitive: the loop multiplies the profile basal by it (without dynamic ISF it also divides the ISF by it).<b>Full days</b>, <b>Day mean</b>, <b>Day SD</b>: local days wholly under that profile and percentage, their mean total insulin (U) and its standard deviation. Click a profile to see its basal by hour of day.</p>
 
   <div class="profiles-table-wrap">
@@ -79,6 +63,7 @@
   </div>
 
   <p class="text-muted report-note">The first chart of a profile shows its basal rate (U/h) by hour of day at 100% (solid) and at the percentages used (dashed). Delivered basal and SMBs/boluses are means (U/h) with a band of ± one standard deviation, over the local clock hours wholly under the profile and the selected percentage; a band is missing where there is only one such hour. The second chart shows the loop's sensitivity ratio the same way (mean of each hour with a ratio known for at least half of it); 1 is no change. Each line, and the second chart, can be switched off with its checkbox or by clicking the line in the legend.</p>
+  <p class="text-muted report-note" id="testNote" hidden>With <b>Show the AI Test profile</b> on, the first chart also shows the basal of the AI Test profile (red), which an AI agent wrote through loopk's MCP tools to simulate with; AAPS never receives it. A further chart shows by how much the AI Test's basal, ISF, carb ratio and low target are above (positive) or below the profile's, in percent per hour of day; ISF, carb ratio and target come from the profile's latest version in the profile store. <span id="testAdminNote" hidden><b>Copy into</b> writes a new profile store in which that profile has the AI Test's schedules and DIA, the other profiles unchanged; a profile that isn't in it yet (made on the phone) is added. AAPS takes it with "Receive profile store" on in its NSClient settings, and uses it once you switch to that profile.</span></p>
 </div>
 <script src="/vendor/chart-4.5.1.umd.min.js"></script>
 <script type="module" src="/profiles.js"></script>
