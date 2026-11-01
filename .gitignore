@@ -8,3 +8,4 @@ modelling/.cache/
 modelling/.venv/
 modelling/results/
 __pycache__/
+.cache/
