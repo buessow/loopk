@@ -82,7 +82,8 @@ The app's database roles can only read and write rows. Schema changes go in a ne
 | --- | --- |
 | `DATABASE_URL` | Postgres connection (written by `setup-db-users.sh`) |
 | `DATA_SOURCE` | `postgres` (default, `DATABASE_URL`), `memory` (an empty database in the process, lost on exit) or `nightscout` (see below) |
-| `NIGHTSCOUT_URL`, `NIGHTSCOUT_TOKEN` | With `DATA_SOURCE=nightscout`: the server to read, and an access token on it (read is enough) |
+| `NIGHTSCOUT_URL`, `NIGHTSCOUT_TOKEN` | With `DATA_SOURCE=nightscout`: the server to read, and an access token on it (read is enough). Without `NIGHTSCOUT_TOKEN` each caller brings their own; without `NIGHTSCOUT_URL` too, they name the server when signing in |
+| `SESSION_KEY` | Without `NIGHTSCOUT_TOKEN`: the secret that encrypts callers' tokens in their cookies and JWTs (e.g. `openssl rand -base64 32`); if unset, a random one, so sign-ins end with a restart |
 | `PORT`, `BASE_URL` | Listen port; public URL (used for the Google callback; `https://` enables secure cookies) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth client (type "Web application") with redirect URI `<BASE_URL>/auth/google/callback` |
 | `ADMIN_EMAILS` | Google accounts that sign in as admin (can manage tokens and people on `/admin`) |
@@ -106,7 +107,30 @@ The app's database roles can only read and write rows. Schema changes go in a ne
 
 ## Without a database
 
-With `DATA_SOURCE=nightscout`, Loopk keeps nothing: it reads the Nightscout server (or another Loopk) at `NIGHTSCOUT_URL` through API v3 into an in-memory Postgres (PGlite) and answers from there with the same queries (`src/data/nightscout/`). It loads what each request needs: the time ranges it reads, and profile switches back from a time until the one in effect; a longer period fetches only the days missing. Changes on that server are read at most once a minute. Sport mode and copying a profile write to that server; Loopk's own API accepts no changes. Two lookups are narrower than with Postgres: limits named in the loop's reasons come from the last 2 days (not 90), and the simulator lists the profiles switched to in the last 60 days (not a year). Access tokens, people and settings live in memory and are lost on restart.
+With `DATA_SOURCE=nightscout`, Loopk keeps nothing: it reads the Nightscout server (or another Loopk) at `NIGHTSCOUT_URL` through API v3 into an in-memory Postgres (PGlite) and answers from there with the same queries (`src/data/nightscout/`). It loads what each request needs: the time ranges it reads, and profile switches back from a time until the one in effect; a longer period fetches only the days missing. Changes on that server are read at most once a minute. Sport mode and copying a profile write to that server; Loopk's own API accepts no changes. Two lookups are narrower than with Postgres: limits named in the loop's reasons come from the last 2 days (not 90), and the simulator lists the profiles switched to in the last 60 days (not a year). The loop settings, the AI Test profile and sport mode are kept on that server, as documents `loopk-loop-settings`, `loopk-test-profiles` and `loopk-sport` of its settings collection (saving them needs a token that may change settings there); report dashboards are kept in the browser. Access tokens and people live in memory and are lost on restart.
+
+Without `NIGHTSCOUT_TOKEN`, Loopk keeps no one's token either (`src/passthrough/`): each caller brings one with every request and sees what it may see on that server, with what it may do there.
+
+- The web page asks for an access token on the server and can keep it in a passkey on the device (the passkey's PRF secret encrypts it in the browser, `public/passkey-vault.js`). Signing in sets a cookie with the server and token, encrypted with `SESSION_KEY`.
+- API clients and agents pass the token as `?token=` (also `/mcp?token=`), or exchange it at `/api/v2/authorization/request/<token>` for a JWT that carries it encrypted. Both need `NIGHTSCOUT_URL`.
+- Each token gets its own cache, dropped after 30 minutes without requests.
+- The Access page is gone: tokens are made on the Nightscout server.
+- Without `NIGHTSCOUT_URL`, the sign-in asks for the server's address too, and the server fetches from any address a caller names.
+
+## In the browser
+
+The simulator always runs in the browser (agents simulate on the server, through MCP): `public/localworker.js` runs the server's own Nightscout source over PGlite in a Web Worker and answers the simulator's requests there (`public/localapi.js` over `src/oref/api.js`). The server serves the browser-safe parts of `src/`, `/migrations.json` and PGlite under `/vendor/pglite/`, and keeps what is saved: `GET /api/simulate/stored` hands the worker the loop settings entered and the AI Test profile, and saving settings and the AI Test profile's routes stay on the server. Pages call `request()` (`public/local.js`) instead of `fetch()`:
+
+- Signed in to Loopk, the worker reads Loopk's own API v3 with the page's session, so the data comes from Loopk's server as for the other pages.
+- While a tab holds a Nightscout address and token (opened from `/direct-test`), the worker reads that server directly and answers the rest of Loopk's API too, so no data goes through Loopk's server. The Nightscout server needs CORS (`ENABLE` with `cors`).
+
+Keep modules under `src/analysis`, `data`, `oref`, `predict` and `sync` free of Node imports at load time.
+
+## A test Nightscout
+
+`scripts/nightscout-test.sh start` runs a real Nightscout (release v15.0.9, from source) on this machine for testing Loopk against: its own MongoDB on port 27018, Nightscout at http://localhost:1340 with CORS on (`ENABLE` with `cors`, any origin, as a browser reading Nightscout directly needs). The first start installs it into `.cache/` and writes its API secret and two access tokens, `loopk-read` (readable) and `loopk-admin` (admin), to `.cache/nightscout.env`; `stop` stops it. It starts empty: `SOURCE_URL=… SOURCE_TOKEN=… node scripts/nightscout-seed.js 30` copies the last 30 days of another server into it through API v3. That is health data, so keep it on this machine; `.cache/` is not in git. For data that is nobody's, `node scripts/nightscout-fake.js 14 --replace` makes up 14 days instead (a profile, CGM, meals, walks and a simple SMB loop with its device status) and replaces what the test Nightscout holds; `--dry-run` only prints a summary, and `SEED` picks another set.
+
+Nightscout differs from a Loopk upstream: it has no heart rate collection (Loopk reads none from it), and only admin tokens may read its settings collection.
 
 ## Tests
 

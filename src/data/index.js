@@ -18,7 +18,8 @@
 //   storage(), latest(), close()
 //
 // nightscout/ is a source over another server: the Postgres queries run on
-// an in-memory copy of the ranges they need, loaded on demand.
+// an in-memory copy of the ranges they need, loaded on demand, and loopk's
+// settings are kept on that server (nightscout/settings.js).
 
 import { createPool } from './postgres/pool.js';
 import { memoryPool } from './postgres/memory.js';

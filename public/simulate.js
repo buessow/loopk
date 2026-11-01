@@ -1,6 +1,7 @@
 // The simulate page: one loop decision or a period again with changed
 // settings, on loopk's copies of AAPS's algorithms (POST /api/simulate/run
-// and /period, src/oref). The form and the result rows are in
+// and /period, src/oref), which this browser runs itself (local.js): the
+// server only reads and saves. The form and the result rows are in
 // simulate-model.js; the charts are the glucose page's (glucosechart.js).
 
 import {
@@ -12,6 +13,7 @@ import { loopRuns } from './loopruns.js';
 import { chartSvg, geometry, hoverSvg, nearest } from './glucosechart.js';
 import { DEVICESTATUS_FIELDS, TREATMENT_FIELDS, api, fetchRange, fetchSwitchBefore } from './documents.js';
 import { clearCache, useCacheFor } from './browser-cache.js';
+import { request } from './local.js';
 import { setupTheme } from './theme.js';
 
 const $ = (id) => document.getElementById(id);
@@ -59,7 +61,7 @@ function setStatus (text, warn = false) {
 }
 
 async function call (path, body, method = body ? 'POST' : 'GET') {
-  const res = await fetch(path, {
+  const res = await request(path, {
     method,
     credentials: 'same-origin',
     headers: body ? { 'Content-Type': 'application/json' } : {},
@@ -484,7 +486,7 @@ function wire () {
 }
 
 async function main () {
-  const res = await fetch('/api/session', { credentials: 'same-origin' });
+  const res = await request('/api/session', { credentials: 'same-origin' });
   if (res.status === 401) {
     location.href = '/login';
     return;
@@ -492,10 +494,10 @@ async function main () {
   const session = await res.json();
   await useCacheFor(session.user?.email).catch(() => {});
   state.isAdmin = !!session.isAdmin;
-  $('adminLink').hidden = !session.isAdmin;
+  $('adminLink').hidden = !session.isAdmin || session.keepsNothing;
   $('signOut').addEventListener('click', async () => {
     await clearCache().catch(() => {});
-    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    await request('/auth/logout', { method: 'POST', credentials: 'same-origin' });
     location.href = '/login';
   });
   setupTheme($('themeToggle'));

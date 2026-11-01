@@ -73,6 +73,8 @@ export function createSessionRoutes (ctx) {
       // Whether the Sport button shows: an admin set sport mode up.
       sport: !!ctx.sport?.configured,
       permissions: a.permissions,
+      // A source over another server keeps nothing here: the browser keeps what is the person's own.
+      keepsNothing: Boolean(data.upstream),
     });
   }));
 

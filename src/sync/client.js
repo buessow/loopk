@@ -1,14 +1,18 @@
 // A client of a Nightscout server's API v3 (or another loopk's): exchanges
 // an access token for a JWT (again when it expires), reads with it, and
 // reads changes since a time through history. Used to follow a server
-// (follower.js) and as a data source (src/data/nightscout).
+// (follower.js) and as a data source (src/data/nightscout). Without a token,
+// it reads as the page it runs in is signed in (the browser's worker on
+// loopk's own server, public/localworker.js): with the session cookie.
 
 export class NightscoutClient {
-  /** @param options { url, token (access token on that server), pageSize, fetch } */
+  /** @param options { url, token (access token on that server; none: the page's session), pageSize, fetch } */
   constructor ({ url, token, pageSize = 1000, fetch = globalThis.fetch }) {
     this.url = url.replace(/\/$/, '');
     this.token = token;
-    this.fetch = fetch;
+    this.session = !token;
+    // Called as a plain function: browsers refuse fetch called on another object.
+    this.fetch = (...args) => fetch(...args);
     this.pageSize = pageSize;
     this.jwt = null;
     // Nightscout supports both precise cursor-in-path history requests and
@@ -19,6 +23,15 @@ export class NightscoutClient {
 
   /** Checks the URL and token: exchanges the token and reads one entry. Throws a readable error. */
   async check () {
+    if (this.session) {
+      this.access = { sub: null, permissionGroups: [] };
+      try {
+        await this.get('/api/v3/entries?limit=1&fields=identifier');
+      } catch (err) {
+        throw new Error(`This sign-in cannot read entries on ${this.url}: ${err.message}`);
+      }
+      return;
+    }
     let res;
     try {
       res = await this.fetch(`${this.url}/api/v2/authorization/request/${encodeURIComponent(this.token)}`);
@@ -30,6 +43,8 @@ export class NightscoutClient {
     const body = await res.json().catch(() => null);
     if (!body?.token) throw new Error(`${this.url} does not look like a Nightscout server (no token in the reply)`);
     this.jwt = body.token;
+    // Who the token is and what it may do there: { sub, permissionGroups }.
+    this.access = { sub: body.sub ?? null, permissionGroups: body.permissionGroups ?? [] };
     try {
       await this.get('/api/v3/entries?limit=1&fields=identifier');
     } catch (err) {
@@ -43,12 +58,18 @@ export class NightscoutClient {
     this.jwt = (await res.json()).token;
   }
 
+  /** What a request carries to be allowed: the JWT, or the page's session cookie. */
+  async credentials (headers) {
+    if (this.session) return { headers, credentials: 'same-origin' };
+    if (!this.jwt) await this.authorize();
+    return { headers: { ...headers, Authorization: `Bearer ${this.jwt}` } };
+  }
+
   /** GET with a JWT, exchanging the access token again when it has expired. */
   async get (path, { headers = {} } = {}) {
-    if (!this.jwt) await this.authorize();
-    const request = () => this.fetch(this.url + path, { headers: { ...headers, Authorization: `Bearer ${this.jwt}` } });
+    const request = async () => this.fetch(this.url + path, await this.credentials(headers));
     let res = await request();
-    if (res.status === 401) {
+    if (res.status === 401 && !this.session) {
       await this.authorize();
       res = await request();
     }
@@ -83,15 +104,23 @@ export class NightscoutClient {
   }
 
   /** POST a document with the JWT; returns the reply's result. */
-  async post (path, body) {
-    if (!this.jwt) await this.authorize();
-    const request = () => this.fetch(this.url + path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.jwt}` },
+  post (path, body) {
+    return this.send('POST', path, body);
+  }
+
+  /** PUT (create or replace) a document with the JWT. */
+  put (path, body) {
+    return this.send('PUT', path, body);
+  }
+
+  async send (method, path, body) {
+    const request = async () => this.fetch(this.url + path, {
+      method,
+      ...await this.credentials({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     let res = await request();
-    if (res.status === 401) {
+    if (res.status === 401 && !this.session) {
       await this.authorize();
       res = await request();
     }

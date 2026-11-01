@@ -13,7 +13,11 @@ export function loadConfig (env = process.env) {
     // postgres (DATABASE_URL), or memory: an empty database in this process, lost on exit.
     dataSource: env.DATA_SOURCE || 'postgres',
     // For DATA_SOURCE nightscout: the server to read, and an access token on it.
+    // Without NIGHTSCOUT_TOKEN, each caller brings their own token (src/passthrough),
+    // and, without NIGHTSCOUT_URL, names the server at sign-in.
     nightscout: { url: env.NIGHTSCOUT_URL || '', token: env.NIGHTSCOUT_TOKEN || '' },
+    // Encrypts callers' tokens in their session cookies and JWTs (src/auth/seal.js).
+    sessionKey: env.SESSION_KEY || '',
     databaseUrl: env.DATABASE_URL || 'postgres://localhost/loopkdev',
     google: {
       clientId: env.GOOGLE_CLIENT_ID || '',

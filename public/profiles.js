@@ -410,7 +410,7 @@ async function main () {
     return;
   }
   const session = await res.json();
-  $('adminLink').hidden = !session.isAdmin;
+  $('adminLink').hidden = !session.isAdmin || session.keepsNothing;
   test.isAdmin = !!session.isAdmin;
   $('signOut').addEventListener('click', async () => {
     await clearCache().catch(() => {});

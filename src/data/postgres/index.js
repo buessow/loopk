@@ -1,15 +1,12 @@
 // The Postgres data source: the Nightscout collections as documents
 // (collection.js, mapped to tables by schema.js), the reads loopk's
 // features make over them (records.js) and loopk's own state (state.js).
+// Imports nothing of Node's but in checkSchema, so the browser can use it
+// over PGlite (public/localworker.js).
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { CollectionStore } from './collection.js';
 import { recordStores } from './records.js';
 import { stateStores } from './state.js';
-
-const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'migrations');
 
 // Freshness columns of the monitor (src/monitoring/freshness.js); each is indexed.
 const FRESHNESS_SQL = (collection, column) => `SELECT MAX(${column}) AS timestamp FROM ${collection}`;
@@ -24,6 +21,7 @@ export function postgresSource (pool) {
     collection: (name) => new CollectionStore(pool, name),
     /** Fails fast when setup-databases.sh has not applied every migration to this database. */
     async checkSchema () {
+      const [fs, { MIGRATIONS }] = await Promise.all([import('node:fs/promises'), import('./memory.js')]);
       const files = (await fs.readdir(MIGRATIONS)).filter((f) => f.endsWith('.sql'));
       let applied = new Set();
       try {

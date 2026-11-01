@@ -1108,7 +1108,7 @@ async function main () {
   }
   const session = await res.json();
   await useCacheFor(session.user.email).catch(() => {});
-  $('adminLink').hidden = !session.isAdmin;
+  $('adminLink').hidden = !session.isAdmin || session.keepsNothing;
   // Sport mode, once an admin set it up (Access page).
   if (session.sport) loadSport().catch(console.error);
   $('signOut').addEventListener('click', async () => {

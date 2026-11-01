@@ -30,7 +30,8 @@ says where the result differs from it.
 | `replay.js`, `scripts/oref-replay.js` | The replay check |
 | `simulate.js` | One decision again with changes (phase 3) |
 | `period.js` | A period dosed with changes (phase 4) |
-| `routes.js` | `/api/simulate/run`, `/period` and `/settings` |
+| `api.js` | The requests (`run`, `period`, `settings`), answered in the browser (`public/localworker.js`, `localapi.js`) |
+| `routes.js` | What the server keeps: `/api/simulate/stored` (for the browser), saving settings, the AI Test profile |
 
 The page is `/simulate` (`public/simulate.html`, `simulate.js`,
 `simulate-model.js`). A click on a loop run on the glucose page opens its

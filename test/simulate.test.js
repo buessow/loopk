@@ -7,6 +7,8 @@ import { changedProfile, historyWithChanges, parseChanges } from '../src/oref/si
 import { glucoseStats } from '../src/oref/period.js';
 import { loadSettingsTimeline } from '../src/oref/settings.js';
 import { saveTestProfile, validProfile } from '../src/oref/testprofile.js';
+import { localApi } from '../public/localapi.js';
+import { loopkSettings, nightscoutSource } from '../src/data/nightscout/index.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -62,9 +64,29 @@ before(async () => {
 });
 after(() => s.close());
 
-const run = (changes) => request(s.app).post('/api/simulate/run').set(auth(reader)).send({ time: T, changes });
-const period = (changes, k) => request(s.app).post('/api/simulate/period').set(auth(reader))
-  .send({ from: T - 2 * HOUR, to: T + HOUR, changes, ...(k ? { k } : {}) });
+/**
+ * The simulator as a browser opening the page now answers it
+ * (public/localworker.js): over loopk's API v3 and its stored settings,
+ * read with the reader's token.
+ */
+async function inBrowser (req) {
+  const data = await nightscoutSource({ url: s.url, token: reader.accessToken, settings: loopkSettings });
+  try {
+    return await localApi(data, { url: s.url, upstream: (path) => data.loader.client.get(path) })(req);
+  } finally {
+    await data.close();
+  }
+}
+const answer = (req) => ({
+  async expect (status) {
+    const r = await inBrowser(req);
+    assert.equal(r.status, status, JSON.stringify(r.body));
+    return r;
+  },
+});
+const run = (changes) => answer({ method: 'POST', path: '/api/simulate/run', body: { time: T, changes } });
+const period = (changes, k) => answer({ method: 'POST', path: '/api/simulate/period', body: { from: T - 2 * HOUR, to: T + HOUR, changes, ...(k ? { k } : {}) } });
+const settingsAt = (t) => answer({ path: `/api/simulate/settings?at=${t}` });
 
 test('a what-if decides the recorded run again, as recorded and with changes', async () => {
   const { body } = await run({ settings: SMB_ALWAYS }).expect(200);
@@ -103,8 +125,8 @@ test('a what-if checks its input and needs a run near the time', async () => {
   await run({ settings: { max_iob: 'lots' } }).expect(400);
   await run({ settings: { no_such_setting: 1 } }).expect(400);
   await run({ algorithm: 'MAGIC' }).expect(400);
-  await request(s.app).post('/api/simulate/run').set(auth(reader)).send({ time: T - 10 * 24 * HOUR }).expect(404);
-  await request(s.app).post('/api/simulate/run').send({ time: T }).expect(401);
+  await answer({ method: 'POST', path: '/api/simulate/run', body: { time: T - 10 * 24 * HOUR } }).expect(404);
+  await request(s.app).get('/api/simulate/stored').expect(401);
 });
 
 test('a period dosed unchanged keeps the glucose, more insulin lowers it', async () => {
@@ -128,11 +150,39 @@ test('a period dosed unchanged keeps the glucose, more insulin lowers it', async
   assert.deepEqual(smbs.ks, [0.3, 0.45, 0.6]);
 });
 
+test('the browser simulates over the API as over the database', async () => {
+  const direct = localApi({ ...s.ctx.data, access: { sub: 'watch', permissions: ['*:*:read'] } }, { url: s.url, upstream: async () => [] });
+  const body = { time: T, changes: { settings: SMB_ALWAYS } };
+  assert.deepEqual((await run(body.changes).expect(200)).body, (await direct({ method: 'POST', path: '/api/simulate/run', body })).body);
+  const periodBody = { from: T - 2 * HOUR, to: T + HOUR, changes: {} };
+  assert.deepEqual((await period({}).expect(200)).body, (await direct({ method: 'POST', path: '/api/simulate/period', body: periodBody })).body);
+  assert.deepEqual((await settingsAt(T).expect(200)).body, (await direct({ path: `/api/simulate/settings?at=${T}` })).body);
+  // The server no longer simulates.
+  await request(s.app).post('/api/simulate/run').set(auth(reader)).send(body).expect(404);
+  await request(s.app).post('/api/simulate/period').set(auth(reader)).send(periodBody).expect(404);
+});
+
+test('the browser answers the API itself on a Nightscout server', async () => {
+  const upstream = async (path) => [{ path }];
+  const browser = (access) => localApi({ ...s.ctx.data, access }, { url: 'https://ns.example.com', upstream });
+  const reading = browser({ sub: 'watch', permissions: ['*:*:read'] });
+  const session = (await reading({ path: '/api/session' })).body;
+  assert.equal(session.user.email, 'watch@ns.example.com');
+  assert.equal(session.isAdmin, false);
+  assert.equal(session.inBrowser, true);
+  // Bad input, a reader saving settings, what it does not answer, and API v3 sent on.
+  assert.equal((await reading({ method: 'POST', path: '/api/simulate/run', body: { time: 'soon' } })).status, 400);
+  assert.equal((await reading({ method: 'PUT', path: '/api/simulate/settings', body: { values: { max_iob: 3 } } })).status, 403);
+  assert.equal((await reading({ path: '/api/reports/hours' })).status, 404);
+  assert.deepEqual((await reading({ path: '/api/v3/entries?limit=1' })).body.result, [{ path: '/api/v3/entries?limit=1' }]);
+  assert.equal((await browser({ sub: 'admin', permissions: ['*'] })({ path: '/api/session' })).body.isAdmin, true);
+});
+
 test('a stored profile can stand in for the one recorded', async () => {
   const half = { ...PROFILE, basal: [at(0, 0.5)], sens: [at(0, 100)] };
   await request(s.app).post('/api/v3/profile').set(auth(writer))
     .send({ date: T - 2 * 24 * HOUR, defaultProfile: 'Default', app: 'test', store: { Half: half } }).expect(201);
-  const settings = (await request(s.app).get(`/api/simulate/settings?at=${T}`).set(auth(reader)).expect(200)).body;
+  const settings = (await settingsAt(T).expect(200)).body;
   assert.deepEqual(settings.profiles.toSorted(), ['Default', 'Half']);
   const { body } = await run({ profile: { name: 'Half' } }).expect(200);
   // Half's ISF instead of the recorded one
@@ -149,7 +199,7 @@ test('the AI Test profile is simulated with, and an admin copies it into a profi
     basedOn: 'Default', note: 'weaker ISF',
   }, 'agent');
   // offered on the simulate page and used like a stored profile
-  const settings = (await request(s.app).get(`/api/simulate/settings?at=${T}`).set(auth(reader)).expect(200)).body;
+  const settings = (await settingsAt(T).expect(200)).body;
   assert.equal(settings.profiles[0], 'AI Test');
   const { body } = await run({ profile: { name: 'AI Test' } }).expect(200);
   assert.match(body.changed.reason, /ISF: 100,/);
@@ -202,23 +252,27 @@ test('a period lists every miss and the decisions of the simulated loop', async 
 });
 
 test('a period checks its length', async () => {
-  await request(s.app).post('/api/simulate/period').set(auth(reader)).send({ from: T, to: T - HOUR }).expect(400);
-  await request(s.app).post('/api/simulate/period').set(auth(reader)).send({ from: T - 15 * 24 * HOUR, to: T }).expect(400);
-  await request(s.app).post('/api/simulate/period').set(auth(reader)).send({ from: T - HOUR, to: T, k: 7 }).expect(400);
+  const post = (body) => answer({ method: 'POST', path: '/api/simulate/period', body });
+  await post({ from: T, to: T - HOUR }).expect(400);
+  await post({ from: T - 15 * 24 * HOUR, to: T }).expect(400);
+  await post({ from: T - HOUR, to: T, k: 7 }).expect(400);
 });
 
 test('settings entered by an admin become the baseline from their time', async () => {
-  const before = (await request(s.app).get(`/api/simulate/settings?at=${T}`).set(auth(reader)).expect(200)).body;
+  const before = (await settingsAt(T).expect(200)).body;
   assert.equal(before.values.enableSMB_always, false);
   assert.equal(before.sources.enableSMB_always, 'default');
   assert.equal(before.profile.isf[0][1], 50);
   await request(s.app).put('/api/simulate/settings').set(auth(reader)).send({ values: SMB_ALWAYS }).expect(403);
   await request(s.app).put('/api/simulate/settings').set('Cookie', cookie).send({ values: { max_iob: 'x' } }).expect(400);
   await request(s.app).put('/api/simulate/settings').set('Cookie', cookie).send({ values: SMB_ALWAYS, validFrom: T - HOUR }).expect(200);
-  const after = (await request(s.app).get(`/api/simulate/settings?at=${T}`).set(auth(reader)).expect(200)).body;
+  const after = (await settingsAt(T).expect(200)).body;
+  // what the browser reads of them
+  const stored = (await request(s.app).get('/api/simulate/stored').set(auth(reader)).expect(200)).body;
+  assert.deepEqual(stored.loopSettings.map((r) => [r.setting, r.value, r.validFrom]), [['enableSMB_always', true, T - HOUR]]);
   assert.equal(after.values.enableSMB_always, true);
   assert.equal(after.sources.enableSMB_always, 'entered');
-  const earlier = (await request(s.app).get(`/api/simulate/settings?at=${T - 2 * HOUR}`).set(auth(reader)).expect(200)).body;
+  const earlier = (await settingsAt(T - 2 * HOUR).expect(200)).body;
   assert.equal(earlier.values.enableSMB_always, false);
   // the what-if starts from them
   const { body } = await run({}).expect(200);

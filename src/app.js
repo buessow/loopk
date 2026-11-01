@@ -18,8 +18,13 @@ import { createMcpRoutes } from './mcp/server.js';
 import { createSimulateRoutes } from './oref/routes.js';
 import { Following } from './sync/following.js';
 import { logRequests } from './monitoring/requests.js';
+import { readMigrations } from './data/postgres/memory.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// The parts of src/ the browser runs itself (public/localworker.js): the
+// data source over Nightscout and the simulator, which import nothing of
+// Node's there.
+const BROWSER_SOURCE = ['analysis', 'data', 'oref', 'predict', 'sync'];
 
 export async function createContext (config, data) {
   const bus = new EventEmitter();
@@ -66,14 +71,33 @@ export function createApp (ctx, { requestLog = false } = {}) {
   app.use('/api', (req, res, next) => (req.path.startsWith('/session') || req.path.startsWith('/admin') ? next() : res.status(404).json({ status: 404, message: 'Not found' })));
   app.use(createSessionRoutes(ctx));
 
-  const pub = path.join(root, 'public');
-  app.get(['/login', '/admin', '/reports', '/profiles', '/simulate'], (req, res) => res.sendFile(path.join(pub, `${req.path.slice(1)}.html`)));
-  app.use(express.static(pub, { index: 'index.html', extensions: ['html'] }));
-
-  // eslint-disable-next-line no-unused-vars
-  app.use((err, req, res, next) => {
-    console.error(err);
-    if (!res.headersSent) res.status(500).json({ status: 500, message: 'Internal Server Error' });
-  });
+  app.use(createPageRoutes());
+  app.use(errorHandler);
   return app;
+}
+
+/** The web pages and their files (public/), and what the browser needs to be loopk itself. */
+export function createPageRoutes () {
+  const router = express.Router();
+  const pub = path.join(root, 'public');
+  router.get(['/login', '/admin', '/reports', '/profiles', '/simulate'], (req, res) => res.sendFile(path.join(pub, `${req.path.slice(1)}.html`)));
+  router.use('/src', (req, res, next) => (BROWSER_SOURCE.includes(req.path.split('/')[1]) ? next() : res.status(404).end()), express.static(path.join(root, 'src')));
+  router.use('/vendor/pglite', express.static(path.join(root, 'node_modules', '@electric-sql', 'pglite', 'dist')));
+  let migrations;
+  router.get('/migrations.json', async (req, res, next) => {
+    try {
+      res.json(await (migrations ??= readMigrations()));
+    } catch (err) {
+      migrations = null;
+      next(err);
+    }
+  });
+  router.use(express.static(pub, { index: 'index.html', extensions: ['html'] }));
+  return router;
+}
+
+// eslint-disable-next-line no-unused-vars
+export function errorHandler (err, req, res, next) {
+  console.error(err);
+  if (!res.headersSent) res.status(500).json({ status: 500, message: 'Internal Server Error' });
 }

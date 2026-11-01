@@ -6,7 +6,7 @@
 //   glucose stayed far below the peak, or a limit held its insulin back.
 // Glucose, targets and ISF are in mg/dL as AAPS reports them.
 
-import { uniqueRuns } from './guide.js';
+import { uniqueRuns } from './runs.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;

@@ -2,6 +2,7 @@
 // the browser cache (browser-cache.js) where it has them.
 
 import { cacheRange, cachedRange } from './browser-cache.js';
+import { request } from './local.js';
 
 export const PAGE = 1000;
 // What the chart needs of a treatment; profile switches add their profile.
@@ -10,7 +11,7 @@ export const TREATMENT_FIELDS = 'identifier,date,created_at,srvModified,eventTyp
 export const DEVICESTATUS_FIELDS = 'identifier,date,srvModified,openaps,loop';
 
 export async function api (path) {
-  const res = await fetch(path, { credentials: 'same-origin' });
+  const res = await request(path, { credentials: 'same-origin' });
   if (res.status === 401) {
     location.href = '/login';
     throw new Error('signed out');

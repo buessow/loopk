@@ -1,7 +1,8 @@
 // The reports page: a dashboard of widgets, each one metric of the hourly
 // totals (reports-model.js) shown as a number, chart or table. GridStack owns
 // the layout, Chart.js the charts. The dashboard is saved per person on the
-// server, so every device shows the same one.
+// server, so every device shows the same one (in this browser on a server
+// that keeps nothing).
 /* global GridStack, Chart */
 
 import {
@@ -27,6 +28,7 @@ const PALETTE = ['--color-accent-700', '--color-accent-500', '--color-accent-300
 
 const state = {
   dashboard: null,
+  inBrowser: false,
   rows: [],
   loadedFrom: null,
   loadedAt: 0,
@@ -113,11 +115,23 @@ async function ensureData (force = false) {
 
 // --- saving ----------------------------------------------------------------
 
+// A server that keeps nothing keeps no dashboards: this browser does.
+const DASHBOARD_KEY = 'loopk.dashboard';
+
+function browserDashboard () {
+  try {
+    return JSON.parse(localStorage.getItem(DASHBOARD_KEY));
+  } catch {
+    return null;
+  }
+}
+
 function scheduleSave () {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     try {
-      await call('PUT', '/api/reports/dashboard', state.dashboard);
+      if (state.inBrowser) localStorage.setItem(DASHBOARD_KEY, JSON.stringify(state.dashboard));
+      else await call('PUT', '/api/reports/dashboard', state.dashboard);
       setStatus('Saved');
       setTimeout(() => { if ($('status').textContent === 'Saved') setStatus(''); }, 1500);
     } catch (err) {
@@ -441,7 +455,7 @@ async function main () {
     return;
   }
   const session = await res.json();
-  $('adminLink').hidden = !session.isAdmin;
+  $('adminLink').hidden = !session.isAdmin || session.keepsNothing;
   $('signOut').addEventListener('click', async () => {
     await clearCache().catch(() => {});
     await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
@@ -460,7 +474,8 @@ async function main () {
   }, $('grid'));
 
   try {
-    const saved = await call('GET', '/api/reports/dashboard');
+    state.inBrowser = !!session.keepsNothing;
+    const saved = state.inBrowser ? browserDashboard() : await call('GET', '/api/reports/dashboard');
     state.dashboard = saved ? normalizeDashboard(saved) : defaultDashboard();
   } catch (err) {
     state.dashboard = defaultDashboard();

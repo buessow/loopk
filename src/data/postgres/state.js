@@ -93,6 +93,11 @@ export function stateStores (pool) {
 
     // Loop settings entered for the simulator, each holding from a time on.
     loopSettings: {
+      /** Every row: [{ setting, value, validFrom, by, updatedAt }]. */
+      async list () {
+        const rows = await all('SELECT setting, value, valid_from, updated_by, updated_at FROM loop_settings ORDER BY valid_from, setting');
+        return rows.map((r) => ({ setting: r.setting, value: r.value, validFrom: r.valid_from.getTime(), by: r.updated_by, updatedAt: r.updated_at.getTime() }));
+      },
       /** [{ setting, value }] holding at `at`. */
       at: (at) => all(`SELECT DISTINCT ON (setting) setting, value FROM loop_settings
          WHERE valid_from <= $1 ORDER BY setting, valid_from DESC`, [new Date(at)]),

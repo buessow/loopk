@@ -7,13 +7,15 @@
 // loaded is refreshed with the server's history of changes at most once a
 // minute. The profile store is small and loaded whole. New documents (sport
 // mode, a copied profile) are written to the server; loopk's own API takes
-// none. loopk's own state (tokens, settings) lives in memory only.
+// none. loopk's settings are kept on the server too (settings.js); the rest
+// of its own state (tokens, people, dashboards) lives in memory only.
 
 import { NightscoutClient } from '../../sync/client.js';
 import { prepare } from '../../sync/normalize.js';
-import { memoryPool } from '../postgres/memory.js';
 import { postgresSource } from '../postgres/index.js';
 import { Coverage } from './coverage.js';
+import { upstreamSettings } from './settings.js';
+export { loopkSettings } from './settings.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -31,6 +33,8 @@ const FURTHEST_BACK = 3 * 365 * DAY;
 // The collections read by time, and the field their ranges use (as the glucose page does).
 const RANGE_FIELD = { entries: 'date', treatments: 'created_at', devicestatus: 'date', heartrate: 'date' };
 const LOADED_WHOLE = ['profile'];
+// How a server answers for a collection it does not have (Nightscout has no heartrate).
+const NO_COLLECTION = /HTTP 404 \(Bad operation or collection\)/;
 // Profile switches and AAPS's effective profile switches (uploaded as notes):
 // loaded on their own, back from a time, for "the latest before".
 const PROFILE_EVENTS = ['Profile Switch', 'Effective Profile Switch', 'Note'];
@@ -122,6 +126,7 @@ class Loader {
     // profileEvents: the profile switches alone; a range of treatments holds them too
     this.coverage = Object.fromEntries([...Object.keys(RANGE_FIELD), 'profileEvents'].map((c) => [c, new Coverage()]));
     this.queues = new Map(); // collection -> the end of its chain of loads
+    this.missing = new Set(); // collections the server does not have
     this.cursor = now() - CLOCK_MARGIN; // history read from here on
     this.refreshed = now();
     this.loads = {};
@@ -167,7 +172,7 @@ class Loader {
     for (const c of [...Object.keys(RANGE_FIELD), ...LOADED_WHOLE]) {
       await this.queue(c, async () => {
         for (let cursor = from; ;) {
-          const docs = await this.client.history(c, cursor);
+          const docs = await this.read(c, () => this.client.history(c, cursor));
           if (!docs.length) break;
           await this.store(c, docs);
           const last = Math.max(...docs.map((d) => (typeof d.srvModified === 'number' ? d.srvModified : 0)));
@@ -186,7 +191,19 @@ class Loader {
     const value = (t) => (field === 'date' ? t : new Date(t).toISOString());
     for (let p = from; p < to; p += piece) {
       const q = Math.min(to, p + piece);
-      await this.store(collection, await this.client.search(collection, { ...query, [`${field}$gte`]: value(p), [`${field}$lt`]: value(q) }));
+      await this.store(collection, await this.read(collection, () => this.client.search(collection, { ...query, [`${field}$gte`]: value(p), [`${field}$lt`]: value(q) })));
+    }
+  }
+
+  /** The documents `get()` reads, none if the server has no such collection. */
+  async read (collection, get) {
+    if (this.missing.has(collection)) return [];
+    try {
+      return await get();
+    } catch (err) {
+      if (!NO_COLLECTION.test(err.message)) throw err;
+      this.missing.add(collection);
+      return [];
     }
   }
 
@@ -268,14 +285,20 @@ class Loader {
   }
 }
 
+// The in-memory Postgres of the server; the browser brings its own (public/localworker.js).
+const serverPool = async () => (await import('../postgres/memory.js')).memoryPool();
+
 /**
  * The Nightscout source for the server at `url`, read with the access token
- * `token`. Throws a readable error if the server or the token does not work.
+ * `token` (none: the page's session, in the browser), over the in-memory
+ * Postgres `pool()` makes, with loopk's settings from `settings(client)`
+ * (on that server's settings collection; loopkSettings: a loopk server's
+ * own). Throws a readable error if the server or the token does not work.
  */
-export async function nightscoutSource ({ url, token, fetch, pageSize = 500 }) {
+export async function nightscoutSource ({ url, token, fetch, pageSize = 500, pool = serverPool, settings = upstreamSettings }) {
   const client = new NightscoutClient({ url, token, fetch, pageSize });
   await client.check();
-  const cache = postgresSource(await memoryPool());
+  const cache = postgresSource(await pool());
   const loader = new Loader(client, cache);
 
   const reads = {};
@@ -323,8 +346,11 @@ export async function nightscoutSource ({ url, token, fetch, pageSize = 500 }) {
     kind: 'nightscout',
     /** The server whose data this is; loopk's own API accepts no changes. */
     upstream: client.url,
+    /** Who the token is on that server and what it may do there: { sub, permissions }. */
+    access: { sub: client.access.sub, permissions: client.access.permissionGroups.flat() },
     collection,
     ...reads,
+    ...settings(client),
     async storage () {
       return { storage: 'nightscout', url: client.url };
     },

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direct read test — loopk</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/app.css">
+<script>
+(function () {
+  var theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+  try { var o = JSON.parse(localStorage.getItem('loopk.theme')); if (o && o.system === theme) theme = o.theme; } catch (e) {}
+  document.documentElement.dataset.theme = theme;
+})();
+</script>
+<style>
+  .dt { max-width: 900px; margin: 0 auto; padding: var(--space-6) var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
+  .dt-box { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
+  .dt-box [hidden] { display: none; }
+  .dt-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: flex-end; }
+  .dt-row .field { flex: 1 1 240px; }
+  .dt-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); }
+  .dt-stat { padding: var(--space-3); border: 1px solid var(--color-divider); }
+  .dt-stat b { display: block; font-size: 26px; font-weight: 600; }
+  .dt-chart { position: relative; height: 300px; }
+  .dt-log { margin: 0; padding: var(--space-3); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--color-divider); min-height: 4em; }
+</style>
+</head>
+<body>
+<main class="dt">
+  <div>
+    <div class="stat-kicker">loopk · test</div>
+    <h2 style="margin:0">Reading Nightscout directly</h2>
+    <p class="text-muted" style="margin:var(--space-2) 0 0">This page reads the last 24 hours from a Nightscout server in your browser, with the server's CORS headers (<code>ENABLE</code> with <code>cors</code>). The token and the data go between this browser and Nightscout only: loopk's server sends this page and nothing else.</p>
+  </div>
+
+  <section class="blueprint dt-box"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <form id="connect" class="dt-row">
+      <div class="field"><label for="url">Nightscout address</label><input class="input" id="url" type="url" required value="http://localhost:1340"></div>
+      <div class="field"><label for="token">Access token</label><input class="input mono" id="token" type="password" autocomplete="off" spellcheck="false" placeholder="loopk-read-0123456789abcdef"></div>
+      <button type="submit" class="btn btn-primary" id="go">Read</button>
+      <button type="button" class="btn" id="passkey" hidden>Read with passkey</button>
+    </form>
+    <label class="check" id="keepField" hidden><input type="checkbox" id="keep"> Keep the address and token in a passkey on this device</label>
+  </section>
+
+  <section class="blueprint dt-box" id="result" hidden><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div class="dt-row" style="align-items:center; justify-content:space-between">
+      <div class="text-muted" id="summary"></div>
+      <button type="button" class="btn" id="simulate" title="The simulator in this tab, run by this browser on this server's data">Open the simulator here</button>
+    </div>
+    <div class="dt-stats">
+      <div class="dt-stat"><span class="text-muted">Now</span><b id="now">–</b><span class="text-muted" id="nowAge"></span></div>
+      <div class="dt-stat"><span class="text-muted">In range 3.9–10 (24 h)</span><b id="tir">–</b></div>
+      <div class="dt-stat"><span class="text-muted">Mean (24 h)</span><b id="mean">–</b></div>
+      <div class="dt-stat"><span class="text-muted">IOB / COB (loop)</span><b id="iob">–</b></div>
+      <div class="dt-stat"><span class="text-muted">Insulin / carbs (24 h)</span><b id="totals">–</b></div>
+    </div>
+    <div class="dt-chart"><canvas id="chart"></canvas></div>
+  </section>
+
+  <pre class="dt-log" id="log"></pre>
+</main>
+<script src="/vendor/chart-4.5.1.umd.min.js"></script>
+<script type="module" src="/direct-test.js"></script>
+</body>
+</html>

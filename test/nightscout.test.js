@@ -142,3 +142,17 @@ test('a loopk over a Nightscout source takes no changes through its own API', as
 test('a wrong token is refused before anything is loaded', async () => {
   await assert.rejects(nightscoutSource({ url: s.url, token: 'nope-0000' }), /did not accept the access token/);
 });
+
+test('a collection the server does not have, as Nightscout has no heart rate, reads as empty', async () => {
+  const fetch = (url, options) => (String(url).includes('/api/v3/heartrate')
+    ? Promise.resolve(new Response(JSON.stringify({ status: 404, message: 'Bad operation or collection' }), { status: 404 }))
+    : globalThis.fetch(url, options));
+  const plain = await nightscoutSource({ url: s.url, token: reader.accessToken, fetch });
+  try {
+    assert.deepEqual(await plain.heartrate.between(t0, t0 + DAY), []);
+    plain.loader.refreshed = 0;
+    assert.equal((await plain.glucose.between(t0, t0 + HOUR)).length, 2);
+  } finally {
+    await plain.close();
+  }
+});

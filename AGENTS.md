@@ -6,9 +6,12 @@ Loopk is a Nightscout-compatible CGM server backed by PostgreSQL. Server code
 lives in `src/`: `api2/` and `api3/` implement HTTP compatibility layers,
 `data/` is the data source (`ctx.data`) through which all reads and writes
 go, with `data/postgres/` mapping documents to Postgres and holding all SQL,
-`auth/` handles access, `sync/` handles Nightscout following, and `web/`
-contains session routes. Features take the data source, never a pool. Browser assets are
-plain ES modules, HTML, and CSS in `public/`. Add schema changes as the next
+`auth/` handles access, `sync/` handles Nightscout following, `web/`
+contains session routes, and `passthrough/` serves each caller their own
+loopk over a Nightscout source when the server keeps no token. Features take the data source, never a pool. Browser assets are
+plain ES modules, HTML, and CSS in `public/`; `public/localworker.js` also runs
+the browser-safe parts of `src/` (analysis, data, oref, predict, sync: no Node
+imports at load time) to answer the API in the browser. Add schema changes as the next
 numbered SQL file in `migrations/`; do not alter applied migrations. Tests live
 in `test/`, and operational scripts are in the repository root and `scripts/`.
 
