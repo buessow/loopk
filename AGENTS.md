@@ -11,7 +11,9 @@ contains session routes, and `passthrough/` serves each caller their own
 loopk over a Nightscout source when the server keeps no token. Features take the data source, never a pool. Browser assets are
 plain ES modules, HTML, and CSS in `public/`; `public/localworker.js` also runs
 the browser-safe parts of `src/` (analysis, data, oref, predict, sync: no Node
-imports at load time) to answer the API in the browser. Add schema changes as the next
+imports at load time) to answer the API in the browser. `src/mcp/local.js`
+runs the MCP tools in an agent's own Node, from the package `src/mcp/pack.js`
+builds of what it imports: keep that import graph free of express and pg. Add schema changes as the next
 numbered SQL file in `migrations/`; do not alter applied migrations. Tests live
 in `test/`, and operational scripts are in the repository root and `scripts/`.
 

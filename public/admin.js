@@ -88,18 +88,66 @@ function mcpCommands (origin, accessToken) {
   ];
 }
 
+/**
+ * How each agent runs loopk's MCP server itself with the token (src/mcp/local.js),
+ * from the package at `pkg` (npx keeps what it fetched, so the URL names the version).
+ */
+function localMcpCommands (origin, accessToken, pkg) {
+  const env = { LOOPK_URL: origin, LOOPK_TOKEN: accessToken };
+  const pairs = Object.entries(env).map(([k, v]) => `${k}=${v}`);
+  const config = { mcpServers: { loopk: { command: 'npx', args: ['-y', pkg], env } } };
+  return [
+    ['Claude Code', `claude mcp add --scope user loopk ${pairs.map((p) => `-e ${p}`).join(' ')} -- npx -y ${pkg}`],
+    ['Codex CLI (ChatGPT)', `codex mcp add loopk ${pairs.map((p) => `--env ${p}`).join(' ')} -- npx -y ${pkg}`],
+    ['Gemini CLI', `gemini mcp add --scope user loopk ${pairs.map((p) => `-e ${p}`).join(' ')} -- npx -y ${pkg}`],
+    ['Claude Desktop, other clients (JSON configuration)', JSON.stringify(config)],
+  ];
+}
+
+// Where the agent's MCP runs, remembered in this browser.
+const MCP_WHERE = 'loopk.mcpWhere';
+const mcpWhere = () => document.querySelector('input[name=mcpWhere]:checked').value;
+let agentToken = null;
+
+async function showMcpCommands () {
+  const agent = mcpWhere() === 'agent';
+  $('mcpServerText').hidden = agent;
+  $('mcpAgentText').hidden = !agent;
+  if (!agentToken) return;
+  let commands = mcpCommands(location.origin, agentToken);
+  if (agent) {
+    const { path } = await call('GET', '/mcp/local.json');
+    commands = localMcpCommands(location.origin, agentToken, location.origin + path);
+  }
+  $('mcpResult').innerHTML = commands.map(([label, text], i) => `<div class="field">
+      <label for="mcpCommand${i}">${esc(label)}</label>
+      <div class="row" style="align-items:stretch;flex-wrap:nowrap"><input class="input mono" id="mcpCommand${i}" readonly value="${esc(text)}" style="flex:1;min-width:0"><button class="btn btn-secondary" type="button" data-copy-token="${esc(text)}">Copy</button></div>
+    </div>`).join('');
+  $('mcpResult').hidden = false;
+  $('mcpResult').style.display = 'flex';
+}
+
+try {
+  const saved = localStorage.getItem(MCP_WHERE);
+  const input = document.querySelector(`input[name=mcpWhere][value="${saved}"]`);
+  if (input) input.checked = true;
+} catch { /* no storage: the default */ }
+showMcpCommands().catch(showError);
+for (const input of document.querySelectorAll('input[name=mcpWhere]')) {
+  input.addEventListener('change', () => {
+    try { localStorage.setItem(MCP_WHERE, mcpWhere()); } catch { /* not remembered */ }
+    showMcpCommands().catch(showError);
+  });
+}
+
 $('mcpCreate').addEventListener('click', async () => {
   $('error').hidden = true;
   try {
     let name = 'agent';
     for (let i = 2; tokenNames.includes(name); i++) name = `agent-${i}`;
     const s = await call('POST', '/api/v2/authorization/subjects', { name, canWrite: false, canUploadModel: false, notes: 'MCP agent' });
-    $('mcpResult').innerHTML = mcpCommands(location.origin, s.accessToken).map(([label, text], i) => `<div class="field">
-      <label for="mcpCommand${i}">${esc(label)}</label>
-      <div class="row" style="align-items:stretch;flex-wrap:nowrap"><input class="input mono" id="mcpCommand${i}" readonly value="${esc(text)}" style="flex:1;min-width:0"><button class="btn btn-secondary" type="button" data-copy-token="${esc(text)}">Copy</button></div>
-    </div>`).join('');
-    $('mcpResult').hidden = false;
-    $('mcpResult').style.display = 'flex';
+    agentToken = s.accessToken;
+    await showMcpCommands();
     await loadTokens();
   } catch (err) { showError(err); }
 });

@@ -8,7 +8,8 @@
 //
 // loopkSettings: the same stores read from a loopk server's own (GET
 // /api/simulate/stored), for the browser's worker on that server, which
-// leaves saving to the server's routes.
+// leaves saving to the server's routes, and for an agent's own MCP
+// (src/mcp/local.js), which saves the AI Test profile through them.
 
 const IDS = { loopSettings: 'loopk-loop-settings', testProfiles: 'loopk-test-profiles', sport: 'loopk-sport' };
 // Read again after this long, for changes another caller made.
@@ -42,7 +43,8 @@ export function upstreamSettings (client) {
       await client.put(`/api/v3/settings/${IDS[kind]}`, { identifier: IDS[kind], app: 'loopk', date, utcOffset: 0, loopk: value });
       dates.set(kind, date);
     } catch (err) {
-      if (/HTTP (401|403)\b/.test(err.message)) throw new Error(`Saving needs a token that may change settings on ${client.url}, which keeps loopk's`);
+      // expose: the message is for the caller (the MCP tools and routes pass it on).
+      if (/HTTP (401|403)\b/.test(err.message)) throw Object.assign(new Error(`Saving needs a token that may change settings on ${client.url}, which keeps loopk's`), { status: 403, expose: true });
       throw err;
     }
     read.set(kind, { at: Date.now(), value });
@@ -64,8 +66,24 @@ export function loopkSettings (client) {
     }
   };
   const put = () => { throw new Error(`loopk's settings are saved on ${client.url}`); };
+  const stores = settingStores(get, put);
   return {
-    ...settingStores(get, put),
+    ...stores,
+    testProfiles: {
+      ...stores.testProfiles,
+      // The server checks it and keeps who saved it.
+      async save (name, { profile, basedOn, note }) {
+        try {
+          await client.put('/api/simulate/test-profile', { profile, basedOn, note });
+        } catch (err) {
+          // What the server refused, for the caller (as upstreamSettings' put).
+          const [, status, reason] = /HTTP (4\d\d)(?: \((.*)\))?$/.exec(err.message) ?? [];
+          if (status) throw Object.assign(new Error(reason || err.message), { status: Number(status), expose: true });
+          throw err;
+        }
+        read = null;
+      },
+    },
     /** The server saved settings: read them again. */
     settingsChanged: () => { read = null; },
   };

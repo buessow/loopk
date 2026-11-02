@@ -194,3 +194,37 @@ test('loopk settings are kept on the Nightscout server, for every token that may
     await ro.close();
   }
 });
+
+test('agents simulate and write the AI Test profile through MCP with their own token, as far as it may change settings', async () => {
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, resolve));
+  const agent = async (token) => {
+    const client = new Client({ name: 'test', version: '1' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${server.address().port}/mcp?token=${token}`)));
+    return client;
+  };
+  const text = (r) => r.content[0].text;
+  const ro = await agent(reader.accessToken);
+  const rw = await agent(writer.accessToken);
+  try {
+    const settings = await ro.callTool({ name: 'get_loop_settings', arguments: { at: new Date(t0).toISOString() } });
+    assert.ok(!settings.isError, text(settings));
+    const period = await ro.callTool({ name: 'simulate_period', arguments: { from: new Date(t0).toISOString(), to: new Date(t0 + 120 * MIN).toISOString() } });
+    assert.ok(text(period).length > 0);
+
+    const refused = await ro.callTool({ name: 'set_test_profile', arguments: { based_on: 'P', note: 'from an agent' } });
+    assert.ok(refused.isError);
+    assert.match(text(refused), /needs a token that may change settings on http/);
+
+    const saved = await rw.callTool({ name: 'set_test_profile', arguments: { based_on: 'P', dia_hours: 6, note: 'from an agent' } });
+    assert.ok(!saved.isError, text(saved));
+    // every token that may read settings there sees it
+    callers.sweep(Date.now() + callers.idle + 1);
+    const seen = JSON.parse(text(await ro.callTool({ name: 'get_test_profile', arguments: {} })));
+    assert.equal(seen.note, 'from an agent');
+  } finally {
+    await ro.close();
+    await rw.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

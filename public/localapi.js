@@ -54,7 +54,7 @@ export function localApi (data, { url, upstream }) {
       return { status: 200, body: await route(body ?? {}, Object.fromEntries(target.searchParams)) };
     } catch (err) {
       if (err instanceof SimulationError) return { status: err.status, body: { status: err.status, message: err.message } };
-      const status = Number(/HTTP (\d{3})/.exec(err.message)?.[1]) || 500;
+      const status = err.status || Number(/HTTP (\d{3})/.exec(err.message)?.[1]) || 500;
       return { status, body: { status, message: err.message } };
     }
   };

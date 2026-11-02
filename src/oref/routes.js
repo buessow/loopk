@@ -2,7 +2,7 @@ import express from 'express';
 import { MANAGE_ACCESS } from '../auth/index.js';
 import { simulateApi } from './api.js';
 import { SimulationError } from './simulate.js';
-import { TEST_PROFILE, copyTestProfile, deleteTestProfile } from './testprofile.js';
+import { TEST_PROFILE, copyTestProfile, deleteTestProfile, saveTestProfile } from './testprofile.js';
 
 const READ = 'This needs a token or account that may read glucose entries, treatments and device status.';
 
@@ -16,6 +16,9 @@ const READ = 'This needs a token or account that may read glucose entries, treat
  *   doesn't upload (admins).
  * GET /api/simulate/test-profile: the "AI Test" profile agents edit
  *   (testprofile.js) and the profiles of the newest profile store.
+ * PUT /api/simulate/test-profile { profile, basedOn, note }: writes it, for
+ *   agents that run loopk's MCP themselves (src/mcp/local.js); a read token
+ *   may, as through /mcp, since AAPS never sees it.
  * POST /api/simulate/test-profile/copy { to }: copies it into that profile
  *   of the store (adding a profile known only from switches), which AAPS
  *   then receives (admins).
@@ -32,13 +35,19 @@ export function createSimulateRoutes (ctx) {
       res.set('Cache-Control', 'no-store');
       await fn(req, res);
     } catch (err) {
-      if (err instanceof SimulationError) return res.status(err.status).json({ status: err.status, message: err.message });
+      if (err instanceof SimulationError || err.expose) return res.status(err.status).json({ status: err.status, message: err.message });
       next(err);
     }
   };
 
   router.get('/stored', ...read, h(async (req, res) => res.json(await api.stored())));
   router.get('/test-profile', ...read, h(async (req, res) => res.json(await api.testProfile())));
+
+  router.put('/test-profile', ...read, json, h(async (req, res) => {
+    const a = await auth.fromRequest(req);
+    const { profile, basedOn = null, note = null } = req.body || {};
+    res.json(await saveTestProfile(data, { profile, basedOn, note }, a.user?.email ?? a.subject?.name ?? null));
+  }));
 
   const admin = auth.require(MANAGE_ACCESS, 'Only admins may change profiles.');
   router.post('/test-profile/copy', admin, json, h(async (req, res) => {
