@@ -35,9 +35,6 @@ export class Collection {
   // --- helpers ---------------------------------------------------------------
 
   async demand (req, res, permission) {
-    if (this.ctx.data.upstream && !permission.endsWith(':read') && !permission.endsWith(':admin')) {
-      throw sendStatus(res, HTTP.FORBIDDEN, `This server shows the data of ${this.ctx.data.upstream} and accepts no changes; send them to that server`);
-    }
     if (this.ctx.follower && !permission.endsWith(':read') && !permission.endsWith(':admin')) {
       throw sendStatus(res, HTTP.FORBIDDEN, `This server follows ${this.ctx.follower.url} and accepts no changes; make them there.`);
     }

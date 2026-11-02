@@ -11,14 +11,11 @@ import { createMcpServer } from './tools.js';
 export { createMcpServer, linkGuide } from './tools.js';
 
 const READ = 'The MCP server needs read access to entries, treatments and device status: create a token with read access on the admin page and add it to the URL as ?token=.';
-// Over a server that keeps nothing, tokens are made on the Nightscout server it reads.
-const readUpstream = (url) => `The MCP server needs read access to entries, treatments and device status: use an access token on ${url} that may read them, added to the URL as ?token=.`;
 
 /** POST /mcp: the MCP endpoint (Streamable HTTP, stateless, JSON responses). */
 export function createMcpRoutes (ctx) {
   const router = express.Router();
-  const needs = ctx.data.upstream ? readUpstream(ctx.data.upstream) : READ;
-  const read = ['api:entries:read', 'api:treatments:read', 'api:devicestatus:read'].map((p) => ctx.auth.require(p, needs));
+  const read = ['api:entries:read', 'api:treatments:read', 'api:devicestatus:read'].map((p) => ctx.auth.require(p, READ));
   router.post('/', read, express.json({ limit: '1mb' }), async (req, res, next) => {
     try {
       res.set('Cache-Control', 'no-store');

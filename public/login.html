@@ -19,18 +19,6 @@
       <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><path d="m10 17 5-5-5-5"></path><path d="M15 12H3"></path></svg>
       Sign in with Google
     </a>
-    <!-- A server that keeps nothing: an access token on the Nightscout server, kept in a passkey if wanted. -->
-    <div id="tokenSignIn" hidden><div style="display:flex;flex-direction:column;gap:var(--space-4)">
-      <p class="text-muted" style="margin:0" id="tokenNote">This server keeps nothing: it shows the data of your Nightscout server with an access token there.</p>
-      <button type="button" class="btn btn-primary" id="passkeySignIn" hidden>Sign in with passkey</button>
-      <form id="tokenForm" style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="field" id="urlField" hidden><label for="nsUrl">Nightscout address</label><input class="input" id="nsUrl" type="url" placeholder="https://my-nightscout.example.com"></div>
-        <div class="field"><label for="nsToken">Access token</label><input class="input mono" id="nsToken" type="password" required autocomplete="off" spellcheck="false" placeholder="readable-0123456789abcdef"></div>
-        <label class="check" id="keepField" hidden><input type="checkbox" id="keep"> Keep it in a passkey on this device</label>
-        <button type="submit" class="btn btn-primary" id="tokenSubmit">Sign in</button>
-      </form>
-      <button type="button" class="btn btn-ghost" id="forget" hidden>Forget the passkey's token on this device</button>
-    </div></div>
   </div>
 </main>
 <script type="module" src="/login.js"></script>

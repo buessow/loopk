@@ -46,7 +46,7 @@ AAPS ──API v3──▶ loopk server ──▶ Postgres
   - the prediction model uploaded to the server (`src/predict/store.js`).
 
 The full server always has Postgres. The server variant over a Nightscout
-server is removed: `DATA_SOURCE=nightscout`, with or without
+server was removed: `DATA_SOURCE=nightscout`, with or without
 `NIGHTSCOUT_TOKEN`, together with `src/passthrough/`. Such a server keeps
 nothing, but every request and all the data still pass through it, and the
 static server covers that need without a server. The Nightscout data source
@@ -267,16 +267,12 @@ file:
 
 ## Order of work
 
-1. Remove the server variant over Nightscout:
-   - `src/passthrough/`;
-   - `DATA_SOURCE=nightscout` in the server's start;
-   - the README section "Without a database";
-   - its tests.
-
-   Keep `src/data/nightscout/`, without `upstreamSettings`.
+1. Done: removed the server variant over Nightscout (`src/passthrough/`,
+   `DATA_SOURCE=nightscout`, the token sign-in, `src/auth/seal.js`).
+   `src/data/nightscout/` stays; `upstreamSettings` goes with step 2.
 2. Make the settings stores over `localStorage` (browser) and a file
    (agent), with export and import on the simulator page and
-   `LOOPK_SETTINGS` in `src/mcp/local.js`.
+   `LOOPK_SETTINGS` in `src/mcp/local.js`, replacing `upstreamSettings`.
 3. Make the worker answer every page's calls: reports, profiles, session,
    sign-out and sport mode. Move the remaining `fetch()` calls to
    `request()`.

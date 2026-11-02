@@ -17,24 +17,22 @@
 //   predictions
 //   storage(), latest(), close()
 //
-// nightscout/ is a source over another server: the Postgres queries run on
-// an in-memory copy of the ranges they need, loaded on demand, and loopk's
-// settings are kept on that server (nightscout/settings.js).
+// nightscout/ is a source over a Nightscout server (or a loopk) for the
+// browser's worker and an agent's own MCP, not the server: the Postgres
+// queries run on an in-memory copy of the ranges they need, loaded on demand.
 
 import { createPool } from './postgres/pool.js';
 import { memoryPool } from './postgres/memory.js';
 import { postgresSource } from './postgres/index.js';
-import { nightscoutSource } from './nightscout/index.js';
 
 export { BadFilterError, REMOVED } from './postgres/collection.js';
 
 /**
- * The data source for `config`: DATA_SOURCE postgres (DATABASE_URL), memory,
- * or nightscout (NIGHTSCOUT_URL read with NIGHTSCOUT_TOKEN, kept nowhere).
+ * The data source for `config`: DATA_SOURCE postgres (DATABASE_URL), or
+ * memory (an empty database in this process).
  */
 export async function createDataSource (config) {
   if (config.dataSource === 'memory') return postgresSource(await memoryPool());
-  if (config.dataSource === 'nightscout') return nightscoutSource(config.nightscout);
   if (config.dataSource && config.dataSource !== 'postgres') throw new Error(`Unknown DATA_SOURCE ${config.dataSource}`);
   return postgresSource(createPool(config.databaseUrl));
 }

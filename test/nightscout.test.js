@@ -7,8 +7,6 @@ import { Coverage } from '../src/data/nightscout/coverage.js';
 import { hourlyTotals } from '../src/reports/index.js';
 import { profileAt } from '../src/analysis/context.js';
 import { findMisses } from '../src/analysis/misses.js';
-import { createApp, createContext } from '../src/app.js';
-import { loadConfig } from '../src/config.js';
 
 // Another loopk plays the Nightscout server: what the Nightscout source
 // answers from its in-memory copy must match what that server's own
@@ -126,17 +124,6 @@ test('searches of the glucose page load their range; writes go to the server, wh
   } finally {
     await rw.close();
   }
-});
-
-test('a loopk over a Nightscout source takes no changes through its own API', async () => {
-  const config = loadConfig({ DATA_SOURCE: 'nightscout', ADMIN_EMAILS: 'admin@example.com' });
-  const ctx = await createContext(config, ns);
-  const app = createApp(ctx);
-  const token = await tokenFor(ctx, 'phone');
-  await request(app).post('/api/v3/entries').set(auth(token)).send({ type: 'sgv', date: t0, sgv: 100, app: 'test' }).expect(403);
-  const { body } = await request(app).get(`/api/v3/entries?date$gte=${t0}&date$lt=${t0 + HOUR}&sort=date`).set(auth(token)).expect(200);
-  assert.deepEqual(body.result.map((d) => d.sgv), [120, 135]);
-  assert.equal((await request(app).get('/api/v3/version').expect(200)).body.result.storage.storage, 'nightscout');
 });
 
 test('a wrong token is refused before anything is loaded', async () => {

@@ -58,7 +58,7 @@ test('with --pages the static site holds the pages, the browser\'s part of src, 
     await build(site, '--pages');
     for (const f of ['simulate.html', 'localworker.js', 'src/oref/api.js', 'src/data/nightscout/index.js', 'vendor/pglite/index.js', 'vendor/pglite/pglite.wasm', 'vendor/pglite/pglite.data']) await fs.access(path.join(site, f));
     // nothing of the server's own
-    for (const f of ['src/auth', 'src/mcp', 'src/passthrough', 'vendor/pglite/index.js.map', 'vendor/pglite/pgcrypto.tar.gz']) await assert.rejects(fs.access(path.join(site, f)), f);
+    for (const f of ['src/auth', 'src/mcp', 'vendor/pglite/index.js.map', 'vendor/pglite/pgcrypto.tar.gz']) await assert.rejects(fs.access(path.join(site, f)), f);
     const migrations = await readJson(path.join(site, 'migrations.json'));
     assert.equal(migrations[0].name, '0001_init.sql');
   });
