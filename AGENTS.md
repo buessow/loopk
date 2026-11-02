@@ -94,8 +94,8 @@ unless asked to.
 ## Deployment
 
 `./deploy.sh` deploys `main`: it runs `npm test`, pushes to `origin main` and
-`origin production`, waits for the "Build and deploy" workflow and checks the
-server. Run from another branch, it offers to merge that branch into `main`
+`origin production`, waits for the "Build and deploy" and "Static pages"
+workflows, and checks the server and the static pages at https://loopk.cc. Run from another branch, it offers to merge that branch into `main`
 first. The deploy applies pending migrations on production (after a backup)
 before the new container starts, so no manual `./setup-databases.sh` is
 needed there; locally, run `./setup-databases.sh --target=local` after adding

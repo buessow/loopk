@@ -25,7 +25,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The parts of src/ the browser runs itself (public/localworker.js): the
 // data source over Nightscout and the simulator, which import nothing of
 // Node's there.
-const BROWSER_SOURCE = ['analysis', 'data', 'oref', 'predict', 'sync'];
+export const BROWSER_SOURCE = ['analysis', 'data', 'oref', 'predict', 'sync'];
 
 export async function createContext (config, data) {
   const bus = new EventEmitter();

@@ -188,6 +188,7 @@ treatment, and device-status record as StatsD gauges
 (`loopk.<collection>_sync_delay_seconds`) to Netdata on `127.0.0.1:8125`, and
 logs a line whenever one of them changes.
 
+The same push publishes the static pages at `https://loopk.cc` (`docs/modes.md`): the "Static pages" workflow runs `scripts/build-static.js`, which writes the MCP package an agent runs itself (`mcp/local-<version>.tgz`, named by `mcp/local.json`, keeping the last 10 published) and, for now, a page that shows how to add it; `--pages` adds the pages once they run without the full server. GitHub Pages serves it, with the repository's Pages source set to "GitHub Actions" and `loopk.cc` as its custom domain (in Cloudflare's DNS, `@` and `www` are CNAMEs to `buessow.github.io`, not proxied).
 
 ## Licence
 

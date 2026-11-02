@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Deploys main: pushes it to origin main and origin production (which starts
-# the "Build and deploy" workflow), waits for that workflow run to finish and
-# checks that the server answers.
+# the "Build and deploy" workflow and the "Static pages" one), waits for
+# both runs to finish, and checks that the server answers and that the
+# static pages (STATIC_URL, default https://loopk.cc) hold the new MCP package.
 #
 #   ./deploy.sh              # from main, or from a branch (asks to merge it into main first)
 #   ./deploy.sh --no-test    # skip npm test before pushing
@@ -11,7 +12,9 @@
 set -euo pipefail
 
 URL="${LOOPK_URL:-https://loopk.robertbuessow.com}"
+STATIC_URL="${STATIC_URL:-https://loopk.cc}"
 WORKFLOW='Build and deploy'
+PAGES_WORKFLOW='Static pages'
 RUN_TESTS=1
 for arg in "$@"; do
   case "$arg" in
@@ -69,41 +72,62 @@ if [ "$RUN_TESTS" = 1 ]; then
   grep -E '^ℹ (pass|fail)' "$log" | tr '\n' ' '; echo
 fi
 
-# Runs for this commit that exist already (a redeploy of the same commit).
+# Runs of a workflow for this commit (some exist already on a redeploy).
 runs_for () {
-  gh run list -w "$WORKFLOW" -b production -L 20 --json databaseId,headSha \
+  gh run list -w "$1" -b production -L 20 --json databaseId,headSha \
     -q "map(select(.headSha == \"$sha\")) | .[].databaseId"
 }
-before=" $(runs_for | tr '\n' ' ') "
+before=" $(runs_for "$WORKFLOW" | tr '\n' ' ') "
+pages_before=" $( (runs_for "$PAGES_WORKFLOW" 2> /dev/null || true) | tr '\n' ' ') "
 
 echo '== push'
 git push -q origin main
 if [ "$(git rev-parse origin/production)" = "$sha" ]; then
-  # Same commit: pushing does not start a run, so start one by hand.
+  # Same commit: pushing does not start a run, so start them by hand.
   gh workflow run "$WORKFLOW" --ref production
+  gh workflow run "$PAGES_WORKFLOW" --ref production
 else
   git push -q origin main:production
 fi
 
-echo "== waiting for the '$WORKFLOW' run of ${sha:0:7}"
-run=''
-for _ in $(seq 1 60); do
-  for id in $(runs_for); do
-    case "$before" in *" $id "*) ;; *) run=$id ;; esac
+# The new run of workflow $1 for this commit, not one of $2 (those before).
+new_run () {
+  for _ in $(seq 1 60); do
+    for id in $(runs_for "$1" 2> /dev/null || true); do
+      case "$2" in *" $id "*) ;; *) echo "$id"; return ;; esac
+    done
+    sleep 3
   done
-  [ -n "$run" ] && break
-  sleep 3
-done
-[ -n "$run" ] || die "no workflow run for ${sha:0:7} appeared; check: gh run list -w '$WORKFLOW'"
+  die "no '$1' run for ${sha:0:7} appeared; check: gh run list -w '$1'"
+}
+
+echo "== waiting for the '$WORKFLOW' run of ${sha:0:7}"
+run=$(new_run "$WORKFLOW" "$before")
 gh run watch "$run" --exit-status --interval 10 || die "the deploy failed; see: gh run view $run --log-failed"
 
 echo "== checking $URL"
 for _ in $(seq 1 20); do
   if curl -fsS -o /dev/null --max-time 10 "$URL/login" && curl -fsS -o /dev/null --max-time 10 "$URL/api/v3/version"; then
-    echo "Deployed ${sha:0:7}; $URL is up."
-    [ "$start" = main ] || git switch -q "$start"
-    exit 0
+    echo "$URL is up."
+    break
   fi
   sleep 3
 done
-die "the workflow succeeded but $URL does not answer"
+curl -fsS -o /dev/null --max-time 10 "$URL/api/v3/version" || die "the workflow succeeded but $URL does not answer"
+
+echo "== waiting for the '$PAGES_WORKFLOW' run of ${sha:0:7}"
+pages_run=$(new_run "$PAGES_WORKFLOW" "$pages_before")
+gh run watch "$pages_run" --exit-status --interval 10 || die "publishing the static pages failed; see: gh run view $pages_run --log-failed"
+version=$(node -e "import('./src/mcp/pack.js').then(async (m) => console.log((await m.mcpPackage()).version))")
+echo "== checking $STATIC_URL"
+for _ in $(seq 1 20); do
+  # GitHub's cache in front of Pages may serve the old file for a minute
+  if curl -fsS --max-time 10 "$STATIC_URL/mcp/local.json?$sha" | grep -q "\"$version\"" \
+    && curl -fsS -o /dev/null --max-time 10 "$STATIC_URL/mcp/local-$version.tgz"; then
+    echo "Deployed ${sha:0:7}; $URL is up and $STATIC_URL has MCP package $version."
+    [ "$start" = main ] || git switch -q "$start"
+    exit 0
+  fi
+  sleep 6
+done
+die "the static pages were published but $STATIC_URL/mcp/local.json does not name package $version"

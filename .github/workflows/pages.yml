@@ -1,0 +1,49 @@
+name: Static pages
+
+# The static server at https://loopk.cc (docs/modes.md), published with the
+# server's deploy: pushing to the production branch runs both.
+# Needs the repository's Pages source set to "GitHub Actions".
+on:
+  push:
+    branches: [production]
+  workflow_dispatch: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Keeps the MCP packages published now, so agents added with an older
+      # version's URL still install it.
+      - run: node scripts/build-static.js _site --keep-from=https://loopk.cc
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

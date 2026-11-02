@@ -9,3 +9,4 @@ modelling/.venv/
 modelling/results/
 __pycache__/
 .cache/
+_site/
