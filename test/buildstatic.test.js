@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { mcpPackage } from '../src/mcp/pack.js';
+import { latestPackage, mcpPackage } from '../src/mcp/pack.js';
 
 // scripts/build-static.js: the static server's files (docs/modes.md).
 const build = (...args) => new Promise((resolve, reject) => {
@@ -38,7 +38,7 @@ async function withDirs (fn) {
 
 const readJson = async (file) => JSON.parse(await fs.readFile(file, 'utf8'));
 
-test('the static site holds the current MCP package, named by mcp/local.json, and a page without the full server\'s', async () => {
+test('the static site holds the current MCP package, named by mcp/local.json, the one that starts it, and a page without the full server\'s', async () => {
   await withDirs(async (dir) => {
     const site = path.join(dir, 'site');
     await build(site);
@@ -46,8 +46,9 @@ test('the static site holds the current MCP package, named by mcp/local.json, an
     assert.deepEqual(await readJson(path.join(site, 'mcp', 'local.json')), { version, path: `/mcp/local-${version}.tgz` });
     assert.deepEqual(await fs.readFile(path.join(site, 'mcp', `local-${version}.tgz`)), tgz);
     assert.deepEqual((await readJson(path.join(site, 'mcp', 'versions.json'))).map((v) => v.version), [version]);
+    assert.deepEqual(await fs.readFile(path.join(site, 'mcp', 'local.tgz')), (await latestPackage()).tgz);
     const index = await fs.readFile(path.join(site, 'index.html'), 'utf8');
-    assert.match(index, new RegExp(`npx -y https://loopk\\.cc/mcp/local-${version}\\.tgz`));
+    assert.match(index, /npx -y https:\/\/loopk\.cc\/mcp\/local\.tgz/);
     await assert.rejects(fs.access(path.join(site, 'login.html')));
   });
 });

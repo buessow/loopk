@@ -123,7 +123,8 @@ echo "== checking $STATIC_URL"
 for _ in $(seq 1 20); do
   # GitHub's cache in front of Pages may serve the old file for a minute
   if curl -fsS --max-time 10 "$STATIC_URL/mcp/local.json?$sha" | grep -q "\"$version\"" \
-    && curl -fsS -o /dev/null --max-time 10 "$STATIC_URL/mcp/local-$version.tgz"; then
+    && curl -fsS -o /dev/null --max-time 10 "$STATIC_URL/mcp/local-$version.tgz" \
+    && curl -fsS -o /dev/null --max-time 10 "$STATIC_URL/mcp/local.tgz"; then
     echo "Deployed ${sha:0:7}; $URL is up and $STATIC_URL has MCP package $version."
     [ "$start" = main ] || git switch -q "$start"
     exit 0

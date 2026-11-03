@@ -90,7 +90,7 @@ function mcpCommands (origin, accessToken) {
 
 /**
  * How each agent runs loopk's MCP server itself with the token (src/mcp/local.js),
- * from the package at `pkg` (npx keeps what it fetched, so the URL names the version).
+ * from the package at `pkg`, which starts the current version (src/mcp/latest.js).
  */
 function localMcpCommands (origin, accessToken, pkg) {
   const env = { LOOPK_URL: origin, LOOPK_TOKEN: accessToken };
@@ -114,11 +114,9 @@ async function showMcpCommands () {
   $('mcpServerText').hidden = agent;
   $('mcpAgentText').hidden = !agent;
   if (!agentToken) return;
-  let commands = mcpCommands(location.origin, agentToken);
-  if (agent) {
-    const { path } = await call('GET', '/mcp/local.json');
-    commands = localMcpCommands(location.origin, agentToken, location.origin + path);
-  }
+  const commands = agent
+    ? localMcpCommands(location.origin, agentToken, `${location.origin}/mcp/local.tgz`)
+    : mcpCommands(location.origin, agentToken);
   $('mcpResult').innerHTML = commands.map(([label, text], i) => `<div class="field">
       <label for="mcpCommand${i}">${esc(label)}</label>
       <div class="row" style="align-items:stretch;flex-wrap:nowrap"><input class="input mono" id="mcpCommand${i}" readonly value="${esc(text)}" style="flex:1;min-width:0"><button class="btn btn-secondary" type="button" data-copy-token="${esc(text)}">Copy</button></div>

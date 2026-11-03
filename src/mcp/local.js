@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // loopk's MCP server run by the agent itself, over stdio (the package
-// pack.js makes, started with `npx -y <loopk>/mcp/local.tgz`): it reads the
+// pack.js makes, started by latest.js from `npx -y <loopk>/mcp/local.tgz`): it reads the
 // data with a token into an in-memory Postgres, as the browser does, and
 // answers every tool and simulation here. The server only sends the data
 // the token may read.

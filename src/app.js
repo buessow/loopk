@@ -19,7 +19,7 @@ import { createSimulateRoutes } from './oref/routes.js';
 import { Following } from './sync/following.js';
 import { logRequests } from './monitoring/requests.js';
 import { readMigrations } from './data/postgres/memory.js';
-import { mcpPackage } from './mcp/pack.js';
+import { latestPackage, mcpPackage } from './mcp/pack.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The parts of src/ the browser runs itself (public/localworker.js): the
@@ -94,7 +94,8 @@ export function createPageRoutes () {
     }
   });
   // loopk's MCP for an agent to run itself (src/mcp/local.js): code, no data.
-  // Any version's URL gets the current package (pack.js).
+  // local.tgz starts the current package (latest.js); any version's URL gets
+  // the current package (pack.js).
   router.get('/mcp/local.json', async (req, res, next) => {
     try {
       const { version } = await mcpPackage();
@@ -105,7 +106,7 @@ export function createPageRoutes () {
   });
   router.get(/^\/mcp\/local(-[0-9a-f]+)?\.tgz$/, async (req, res, next) => {
     try {
-      const { tgz, etag } = await mcpPackage();
+      const { tgz, etag } = await (req.params[0] ? mcpPackage() : latestPackage());
       res.set({ 'Content-Type': 'application/gzip', ETag: etag, 'Cache-Control': 'no-cache' });
       if (req.get('if-none-match') === etag) return res.status(304).end();
       res.send(tgz);

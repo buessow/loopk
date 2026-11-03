@@ -73,7 +73,8 @@ GitHub Pages:
 - PGlite's browser files, about 16 MB, chiefly `pglite.wasm` and
   `pglite.data`;
 - `migrations.json`, written at build time instead of by a route;
-- the MCP package `mcp/local-<version>.tgz` and `mcp/local.json`, built by
+- the MCP package `mcp/local-<version>.tgz`, `mcp/local.json` naming the
+  current one, and `mcp/local.tgz`, which starts the current one, built by
   `src/mcp/pack.js` at build time.
 
 The pages must not call any route the full server answers itself; the
@@ -153,15 +154,18 @@ it in its own Node. The token is part of the agent's MCP configuration:
 claude mcp add --scope user loopk \
   -e NIGHTSCOUT_URL=https://my.nightscout.example \
   -e NIGHTSCOUT_TOKEN=<token> \
-  -- npx -y https://loopk.cc/mcp/local-<version>.tgz
+  -- npx -y https://loopk.cc/mcp/local.tgz
 ```
 
 - `src/mcp/local.js` reads Nightscout directly and answers every tool and
   simulation in the agent's Node. This already works today with the
   variables above.
-- npx keeps the package it fetched. An agent gets a new version only when
-  it is added again with the new version's URL, which `mcp/local.json`
-  names.
+- npx keeps the package it fetched from a URL and never fetches it again.
+  So `mcp/local.tgz` is a small package that never changes
+  (`src/mcp/latest.js`): at each start it reads `mcp/local.json` and runs
+  the versioned package it names, `npx -y …/mcp/local-<version>.tgz`, which
+  npx then keeps. Offline, it runs the version it ran last. The site is
+  `LOOPK_SITE`, else `LOOPK_URL`, else `https://loopk.cc`.
 - The static server's sign-in page makes these commands from the address
   and token the person entered, in place of the Access page. It does this
   in the browser, so the token is never sent anywhere.

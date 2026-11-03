@@ -1,6 +1,7 @@
 // Writes loopk's static server (docs/modes.md) into a directory, for GitHub
 // Pages (.github/workflows/pages.yml): the MCP package an agent runs itself
-// (mcp/local-<version>.tgz, named by mcp/local.json), and with --pages the
+// (mcp/local-<version>.tgz, named by mcp/local.json), the package that starts
+// the current one (mcp/local.tgz, src/mcp/latest.js), and with --pages the
 // pages and what the browser needs to be loopk itself, as the full server
 // serves them (createPageRoutes in src/app.js). Nothing in it is anyone's
 // data.
@@ -10,7 +11,7 @@
 // Each publish replaces the whole site, and npx keeps a package by its URL:
 // --keep-from fetches the packages the published site holds (mcp/versions.json)
 // and keeps the last KEEP of them, so an agent added with an older version's
-// URL can still install it.
+// URL can still install it. Agents added with mcp/local.tgz run the current one.
 
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -18,7 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BROWSER_SOURCE } from '../src/app.js';
 import { readMigrations } from '../src/data/postgres/memory.js';
-import { mcpPackage } from '../src/mcp/pack.js';
+import { latestPackage, mcpPackage } from '../src/mcp/pack.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // MCP packages kept, the current one included.
@@ -55,6 +56,7 @@ async function writeMcp (dir, keepFrom) {
   for (const p of versions) await fs.writeFile(path.join(dir, 'mcp', `local-${p.version}.tgz`), p.tgz);
   await fs.writeFile(path.join(dir, 'mcp', 'versions.json'), JSON.stringify(versions.map(({ version, at }) => ({ version, at }))));
   await fs.writeFile(path.join(dir, 'mcp', 'local.json'), JSON.stringify({ version, path: `/mcp/local-${version}.tgz` }));
+  await fs.writeFile(path.join(dir, 'mcp', 'local.tgz'), (await latestPackage()).tgz);
   return versions.map((p) => p.version);
 }
 
@@ -73,7 +75,7 @@ async function writePlaceholder (dir, version) {
   const command = `claude mcp add --scope user loopk \\
   -e NIGHTSCOUT_URL=https://your.nightscout.example \\
   -e NIGHTSCOUT_TOKEN=&lt;an access token on it&gt; \\
-  -- npx -y https://loopk.cc/mcp/local-${version}.tgz`;
+  -- npx -y https://loopk.cc/mcp/local.tgz`;
   await fs.writeFile(path.join(dir, 'index.html'), `<!doctype html>
 <html lang="en">
 <head>
@@ -93,7 +95,7 @@ async function writePlaceholder (dir, version) {
 <p>Static pages of <a href="https://github.com/buessow/loopk">loopk</a>: code only. Nothing here keeps or receives anyone's data.</p>
 <p>The pages that run loopk in your browser are coming. Agents can already run loopk's MCP tools themselves, reading your Nightscout server directly (Node 20 or later):</p>
 <pre>${command}</pre>
-<p class="muted">Codex, Gemini CLI and other MCP clients take the same command and variables. Package ${version}, from commit ${process.env.GITHUB_SHA?.slice(0, 7) ?? 'local'}.</p>
+<p class="muted">Codex, Gemini CLI and other MCP clients take the same command and variables. It runs the current package at each start: ${version}, from commit ${process.env.GITHUB_SHA?.slice(0, 7) ?? 'local'}.</p>
 </body>
 </html>
 `);

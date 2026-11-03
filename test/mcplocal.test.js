@@ -2,6 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -9,7 +10,7 @@ import request from 'supertest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { startServer, tokenFor } from './helpers.js';
-import { mcpPackage } from '../src/mcp/pack.js';
+import { latestPackage, mcpPackage } from '../src/mcp/pack.js';
 import { loadTestProfile } from '../src/oref/testprofile.js';
 
 // loopk's MCP run by the agent itself (src/mcp/local.js), over stdio,
@@ -94,7 +95,12 @@ test('the package holds what local.js imports, with the packages they import at 
   const res = await request(s.app).get(current.path).expect(200).expect('Content-Type', 'application/gzip').expect('ETag', etag);
   assert.equal(res.body.length, tgz.length);
   await request(s.app).get('/mcp/local-0123abcd.tgz').expect(200);
-  await request(s.app).get('/mcp/local.tgz').set('If-None-Match', etag).expect(304);
+  await request(s.app).get('/mcp/local-0123abcd.tgz').set('If-None-Match', etag).expect(304);
+  // the URL that stays starts the current package
+  const latest = await latestPackage();
+  const stays = await request(s.app).get('/mcp/local.tgz').expect(200).expect('ETag', latest.etag);
+  assert.equal(stays.body.length, latest.tgz.length);
+  assert.deepEqual(Object.keys(untar(gunzipSync(latest.tgz))), ['package/package.json', 'package/src/mcp/latest.js']);
 });
 
 test('the package runs on its own, unpacked as npx installs it', async () => {
@@ -167,4 +173,44 @@ test('without a server or with a wrong token the agent\'s MCP ends with a readab
   const wrong = await run({ LOOPK_URL: s.url, LOOPK_TOKEN: 'nope-0000' });
   assert.equal(wrong.code, 1);
   assert.match(wrong.stderr, /did not accept the access token/);
+});
+
+test('the package at the URL that stays runs the version mcp/local.json names, and offline the one it ran last', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'loopk-latest-'));
+  // a site with a stand-in for the current package, which prints what it was given
+  const site = path.join(dir, 'site');
+  await fs.mkdir(path.join(site, 'mcp'), { recursive: true });
+  const stub = path.join(dir, 'stub', 'package');
+  await fs.mkdir(stub, { recursive: true });
+  await fs.writeFile(path.join(stub, 'package.json'), JSON.stringify({ name: 'stub', version: '1.0.0', bin: { stub: 'run.js' } }));
+  await fs.writeFile(path.join(stub, 'run.js'), '#!/usr/bin/env node\nconsole.log(`v1 ${process.env.LOOPK_TOKEN}`);\n', { mode: 0o755 });
+  await new Promise((resolve, reject) => execFile('tar', ['-czf', path.join(site, 'mcp', 'local-v1.tgz'), '-C', path.dirname(stub), 'package'], (err) => (err ? reject(err) : resolve())));
+  await fs.writeFile(path.join(site, 'mcp', 'local.json'), JSON.stringify({ version: 'v1', path: '/mcp/local-v1.tgz' }));
+  const server = http.createServer(async (req, res) => {
+    try {
+      res.end(await fs.readFile(path.join(site, new URL(req.url, 'http://x').pathname)));
+    } catch {
+      res.statusCode = 404;
+      res.end();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  // its own home, so npx's cache and the version run last start empty
+  const launch = () => new Promise((resolve) => {
+    execFile(process.execPath, ['src/mcp/latest.js'], { env: { PATH: process.env.PATH, HOME: dir, LOOPK_SITE: url, LOOPK_TOKEN: 't0k' } },
+      (err, stdout, stderr) => resolve({ code: err?.code ?? 0, stdout, stderr }));
+  });
+  try {
+    const online = await launch();
+    assert.equal(online.code, 0, online.stderr);
+    assert.equal(online.stdout.trim(), 'v1 t0k');
+    await new Promise((resolve) => server.close(resolve));
+    const offline = await launch();
+    assert.equal(offline.code, 0, offline.stderr);
+    assert.equal(offline.stdout.trim(), 'v1 t0k');
+  } finally {
+    server.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });

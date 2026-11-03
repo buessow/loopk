@@ -1,4 +1,4 @@
-// The package an agent runs loopk's MCP from (`npx -y <loopk>/mcp/local.tgz`,
+// The package an agent runs loopk's MCP from (`npx -y <loopk>/mcp/local-<version>.tgz`,
 // local.js): the modules local.js imports, followed from it, in the
 // repository's layout so their relative imports hold, the files they read
 // (the migrations its in-memory Postgres needs, the AAPS guide), and a package.json with the packages they import
@@ -98,4 +98,36 @@ export function mcpPackage () {
     throw err;
   });
   return built;
+}
+
+const LAUNCHER = 'src/mcp/latest.js';
+let launcher = null;
+
+/**
+ * The package at the URL that stays (`npx -y <site>/mcp/local.tgz`, latest.js):
+ * it starts the current package, so it changes only with latest.js: { tgz, etag }.
+ */
+export function latestPackage () {
+  launcher ??= (async () => {
+    const own = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+    const pkg = {
+      name: 'loopk-mcp-latest',
+      version: '1.0.0',
+      description: 'Starts loopk\'s current MCP package (LOOPK_SITE, default https://loopk.cc)',
+      type: 'module',
+      bin: { 'loopk-mcp': LAUNCHER },
+      engines: own.engines || { node: '>=20' },
+    };
+    const tar = Buffer.concat([
+      entry('package/package.json', Buffer.from(JSON.stringify(pkg, null, 2) + '\n'), 0o644),
+      entry(`package/${LAUNCHER}`, await fs.readFile(path.join(root, LAUNCHER)), 0o755),
+      Buffer.alloc(1024),
+    ]);
+    const tgz = zlib.gzipSync(tar, { level: 9 });
+    return { tgz, etag: `"${createHash('sha256').update(tgz).digest('hex').slice(0, 12)}"` };
+  })().catch((err) => {
+    launcher = null;
+    throw err;
+  });
+  return launcher;
 }
