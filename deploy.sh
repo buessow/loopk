@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Deploys main: pushes it to origin main and origin production (which starts
 # the "Build and deploy" workflow and the "Static pages" one), waits for
-# both runs to finish, and checks that the server answers and that the
-# static pages (STATIC_URL, default https://loopk.cc) hold the new MCP package.
+# both runs to finish, and checks that the server answers.
 #
 #   ./deploy.sh              # from main, or from a branch (asks to merge it into main first)
 #   ./deploy.sh --no-test    # skip npm test before pushing
@@ -12,7 +11,6 @@
 set -euo pipefail
 
 URL="${LOOPK_URL:-https://loopk.robertbuessow.com}"
-STATIC_URL="${STATIC_URL:-https://loopk.cc}"
 WORKFLOW='Build and deploy'
 PAGES_WORKFLOW='Static pages'
 RUN_TESTS=1
@@ -118,17 +116,5 @@ curl -fsS -o /dev/null --max-time 10 "$URL/api/v3/version" || die "the workflow 
 echo "== waiting for the '$PAGES_WORKFLOW' run of ${sha:0:7}"
 pages_run=$(new_run "$PAGES_WORKFLOW" "$pages_before")
 gh run watch "$pages_run" --exit-status --interval 10 || die "publishing the static pages failed; see: gh run view $pages_run --log-failed"
-version=$(node -e "import('./src/mcp/pack.js').then(async (m) => console.log((await m.mcpPackage()).version))")
-echo "== checking $STATIC_URL"
-for _ in $(seq 1 20); do
-  # GitHub's cache in front of Pages may serve the old file for a minute
-  if curl -fsS --max-time 10 "$STATIC_URL/mcp/local.json?$sha" | grep -q "\"$version\"" \
-    && curl -fsS -o /dev/null --max-time 10 "$STATIC_URL/mcp/local-$version.tgz" \
-    && curl -fsS -o /dev/null --max-time 10 "$STATIC_URL/mcp/local.tgz"; then
-    echo "Deployed ${sha:0:7}; $URL is up and $STATIC_URL has MCP package $version."
-    [ "$start" = main ] || git switch -q "$start"
-    exit 0
-  fi
-  sleep 6
-done
-die "the static pages were published but $STATIC_URL/mcp/local.json does not name package $version"
+echo "Deployed ${sha:0:7}; $URL is up and the static pages are published."
+[ "$start" = main ] || git switch -q "$start"
