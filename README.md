@@ -1,184 +1,116 @@
 # Loopk
 
-A small Nightscout-compatible server for AAPS, backed by PostgreSQL, with a glucose log web page and Google sign-in.
+A Nightscout add-on for AAPS: better reporting, and simulation of changes to the loop's settings.
 
-## How Loopk works
+Open **https://loopk.cc**, enter your Nightscout address and an access token, and Loopk shows what your loop did, where it got it wrong, and what other settings would have done. Everything runs in your browser and reads straight from your Nightscout server: no Loopk server ever sees your data or your token.
 
-Loopk sits between diabetes devices or AAPS and a PostgreSQL database. AAPS
-uses the Nightscout API v3 to upload and synchronize glucose entries,
-treatments, device status, profiles, food, and heart-rate data. Loopk exposes
-the small API v2 token-exchange endpoint that NSClient needs as well, and sends
-live changes through its `/storage` Socket.IO namespace.
+> **Status:** the browser pages are being built. Today, loopk.cc offers Loopk's tools for AI agents ([below](#ask-an-ai-agent)).
 
-Express routes requests to the API, authentication, and static dashboard. The
-API maps the known Nightscout fields to typed Postgres columns and child tables;
-unrecognized fields are retained in `extra` JSONB so documents can round-trip
-without losing data. Each write receives a server-modified timestamp. Clients
-use that timestamp, ETags, and collection history endpoints as incremental sync
-cursors instead of repeatedly downloading the entire history.
+## What you can do with it
 
-The dashboard in `public/` is a dependency-free browser application. It fetches
-the selected glucose range, derives charts and insulin metrics locally, and
-caches recent collection data in IndexedDB. On later visits it paints the cache
-first, then requests only changes after its stored history cursor.
+### See what happened
 
-The reports page (`/reports`) is a dashboard each signed-in person arranges
-themselves: widgets showing one metric (time in ranges, mean glucose, GMI,
-variability, insulin, carbs, heart rate) as a number, chart or table, over the
-whole period or by day, week, month, year, hour of day or weekday. The server
-sends hourly totals (`GET /api/reports/hours`, `src/reports/`), with basal
-integrated from the profile and temp basals; the page adds them up
-(`public/reports-model.js`). Each person's layout is stored in
-`report_dashboards`. GridStack and Chart.js are vendored in `public/vendor/`.
+The glucose page charts your CGM readings with boluses, carbs, temp basals and the basal profile, and pans back through your whole history. Turn on **Loop algorithm** to see each of AAPS's runs: which algorithm ran, its target and the glucose it expected, and, on hover, its prediction and decision. Tiles above the chart show time in ranges, mean glucose, GMI, the basal running now, insulin per day and what is on board.
 
-The simulate page (`/simulate`) shows what the AAPS loop would have done
-with other settings. It runs loopk's ports of AAPS 3.4's algorithms (SMB,
-Dynamic ISF, AutoISF; `src/oref/`, under the AGPL like AAPS) on inputs
-rebuilt from the database. It can decide one recorded loop run again, or
-dose a period again and estimate the glucose that would have followed.
-Settings AAPS doesn't upload are read from its logs or entered on the page
-(`loop_settings`). `scripts/oref-replay.js` checks how often the port
-decides as AAPS did. The method, results and limits are in
-`docs/simulator-plan.md`.
+![The glucose page: the summary tiles, and twelve hours of glucose with basal, insulin and carbs on board, boluses, carbs and the loop's runs](docs/screenshots/glucose.png)
 
-During a Nightscout migration, configure `FOLLOW_URL` and `FOLLOW_TOKEN`.
-Loopk imports history from that server and listens for its live storage events,
-so it remains a read-only mirror until AAPS is switched over. A direct MongoDB
-migration can seed the database first, allowing following to resume from the
-latest imported server cursor rather than replaying years of data.
 
-It implements the parts of the Nightscout API that AAPS's NSClient V3 uses:
+### Find where the loop got it wrong
 
-- **API v3** (`/api/v3`): `status`, `version`, `lastModified`, and for `entries`, `treatments`, `devicestatus`, `profile`, `food`, `settings` and `heartrate`: search, create (with Nightscout's deduplication), read, update, patch, soft delete and history. The response formats, error messages and `srvModified`/ETag sync cursors match `buessow/cgm-remote-monitor`.
-- **Token exchange** (`GET /api/v2/authorization/request/:accessToken`) returns the JWT AAPS refreshes on 401.
-- **`/storage` socket.io namespace**: live `create`/`update`/`delete` events after `subscribe { accessToken, collections }`.
+**Loop misses** lists the times the loop dosed badly, one sentence each, with the period to look at:
 
-Each collection is a table with typed columns for the fields AAPS uses (`migrations/0001_init.sql`; the mapping from document fields to columns is in `src/data/postgres/schema.js`). Nested structures have child tables: a profile's named stores and their schedules, the profile embedded in profile switches (`profileJson`), and the loop's predicted glucose curves. `jsonb` is used only for parts without a fixed structure (pump driver and AAPS plugin settings, the bolus wizard result) and for an `extra` column that keeps fields this schema doesn't know, so documents round-trip unchanged.
+- **lows** it helped cause: SMBs in the hours before a low, more than the low left room for (for example SMBs for rescue carbs, or for the rebound after a low);
+- **highs** it saw coming too late or too mildly: the glucose it expected stayed far below the peak, or a limit held its insulin back.
 
-Treatments get two clean-ups that API clients don't see (`migrations/0010_treatment_cleanup.sql`):
+Exactly, a **low** is listed when:
 
-- **Duplicates** — the same bolus or carbs uploaded again under another identifier, as AAPS's pump-history re-syncs do — are moved to `removed_treatments` as they are stored (by any write path), with the identifier of the treatment they duplicate. The uploader is answered as if the copy had been stored. Rerun the cleanup by hand with `SELECT count(*) FROM remove_duplicate_treatments('-infinity', 'infinity')`.
-- **`delivered_insulin`** holds the units each treatment delivered: boluses and SMBs, temp basals for the time they actually ran, extended boluses once. Triggers keep it up to date. It isn't in the documents, because Nightscout clients would count any `insulin` as a bolus.
+1. glucose is below 70 mg/dL (3.9 mmol/L) for at least two readings; the low lasts until glucose is back at 80 mg/dL (4.4 mmol/L) or above;
+2. the SMBs from 60 to 10 minutes before the low began add up to at least 0.5 U;
+3. and they gave at least 0.5 U more than the low left room for. The room is the insulin that takes glucose from the loop's target down to the lowest reading: (target − lowest) / ISF, with the target and ISF of the run that gave the largest of those SMBs, and at most all of the SMBs.
 
-## Setup
+A **high** is listed when:
 
-```sh
-npm install
-./setup-db-users.sh --local          # roles + passwords, written to .env as DATABASE_URL / TEST_DATABASE_URL
-./setup-databases.sh --target=local  # databases, migrations/*.sql, grants, verification
-npm run token -- create aaps         # read & write access token for AAPS
-npm start
-```
+1. glucose is above 180 mg/dL (10.0 mmol/L) until it is back at 170 mg/dL (9.4 mmol/L) or below, for at least 30 minutes, and peaks at 250 mg/dL (13.9 mmol/L) or above;
+2. the loop ran in the hour before the high began;
+3. and either the loop underestimated it, or a limit held it back:
+   - **underestimated:** the glucose the loop dosed for stayed at least 90 mg/dL (5.0 mmol/L) below the peak. For each run in the hour before, that is the lower of its minPredBG and its eventual glucose, as oref sizes insulin on; the middle value (median) of the runs counts;
+   - **held back:** a run from an hour before the high began until its peak hit a limit: an SMB cut to the SMB size limit ("Max minutes of basal to limit SMB to", or the one for UAM), insulin cut at max IOB, a temp basal cut to the max safe basal, or SMBs switched off. When the only limit was max IOB set to 0 because of duplicate glucose readings (AAPS's quality check: two readings at most 20 s apart among the newest 11), the high is marked as caused by them.
 
-For local development without Google, `npm run dev` starts the server with `AUTH_DISABLED=true` (only allowed when `BASE_URL` is `http://localhost`): open http://localhost:1337 and you are signed in as an admin. API clients such as AAPS still need an access token.
+Readings more than 20 minutes apart split a low or a high; one that starts within 30 minutes of the end of the one before continues it.
 
-In AAPS, select NSClient V3, set the URL to this server and the access token to the token printed above.
+![Loop misses: highs the loop dosed for too mildly, one sentence each, with buttons to simulate them](docs/screenshots/misses.png)
 
-The app's database roles can only read and write rows. Schema changes go in a new numbered file in `migrations/` and are applied by `./setup-databases.sh`, which you can re-run safely (see `--help`). The server refuses to start while a migration is pending.
 
-## Environment
+### Report on any period
 
-| Variable | |
-| --- | --- |
-| `DATABASE_URL` | Postgres connection (written by `setup-db-users.sh`) |
-| `DATA_SOURCE` | `postgres` (default, `DATABASE_URL`) or `memory` (an empty database in the process, lost on exit) |
-| `PORT`, `BASE_URL` | Listen port; public URL (used for the Google callback; `https://` enables secure cookies) |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth client (type "Web application") with redirect URI `<BASE_URL>/auth/google/callback` |
-| `ADMIN_EMAILS` | Google accounts that sign in as admin (can manage tokens and people on `/admin`) |
-| `ALLOWED_EMAILS` | Further accounts allowed to sign in read-only (admins can also add people on `/admin`) |
-| `FOLLOW_URL`, `FOLLOW_TOKEN` | Follow this Nightscout server with this access token (read is enough); see below |
-| `MONGO_URL` | Nightscout MongoDB, for the analysis and migration scripts |
-| `STATSD_HOST`, `STATSD_PORT` | Netdata StatsD server for the freshness monitor (default `127.0.0.1:8125`) |
+The reports page is a dashboard you arrange yourself. Each widget shows one metric (time in ranges, mean glucose, GMI, variability, insulin, carbs) as a number, chart or table, over the whole period or by day, week, month, year, hour of day or weekday. Compare this month with the last, or see which hours of the day go wrong.
 
-## Moving from Nightscout
+![The reports page: time in range, mean glucose, GMI and insulin, time in ranges by day, glucose and lows by hour of day, insulin by week and carbs by day](docs/screenshots/reports.png)
 
-1. **Analyse** (optional): `npm run analyze:mongo` reads the Nightscout MongoDB given by `MONGO_URL` (read-only) and writes `mongo-analysis/report.md`: the fields each collection has and had over time, their types, duplicates, and how documents map onto the Postgres schema. For a replica set reachable only under its public name, add `directConnection=true` to the URL.
-2. **Migrate**: `npm run migrate:mongo` copies MongoDB into `DATABASE_URL` (or `-- --target-url=…`), cleaning documents up on the way (`src/sync/normalize.js`):
-   - API v1 documents get their MongoDB `_id` as identifier (as Nightscout serves them), `date`/`created_at` and server timestamps;
-   - records stored more than once (same `created_at` + `eventType`, `date` + `type`, or `created_at` + `device`) are stored once: the API v3 copy, or else the latest upload;
-   - heart rate from before AAPS had a heart rate collection (`activity`, `HeartRate` treatments) and heart rates AAPS filed in `food` move to `heartrate`;
-   - numbers stored as strings (old profiles), times in seconds or microseconds, `tick` as a number, `recieved`, empty objects and NSClient v1 leftovers (`NSCLIENT_ID`, `sysTime`) are fixed.
 
-   It prints what it copied and dropped. Use `--dry-run` to only count, `--replace` to run again over existing data.
-3. **Follow** the Nightscout server until you switch AAPS over: set `FOLLOW_URL` to its URL and `FOLLOW_TOKEN` to a read access token there. Loopk then copies every change (API v3 history, nudged by its `/storage` socket), starting where the migration ended, and its own API refuses data changes. Without a migration it copies everything through the API, which is slow for years of data.
-4. **Switch**: point AAPS (NSClient V3) at Loopk with a read & write token from `/admin`, and remove `FOLLOW_URL`.
+### Understand your profiles
 
-## Over a Nightscout server
+The profiles page shows the basal profiles in effect in a period, the time and insulin under each one and its manual percentages. Click one for a chart by hour of day, with what the loop and you changed on top of it, so you can see at which hours the loop keeps adding or holding back insulin.
 
-The browser's worker and an agent's own MCP (below) read a Nightscout server, or a Loopk, through API v3 into an in-memory Postgres (PGlite) and answer with the same queries as the server (`src/data/nightscout/`). They load what each read needs: the time ranges it reads, and profile switches back from a time until the one in effect; a longer period fetches only the days missing. Changes on that server are read at most once a minute. Sport mode and copying a profile write to that server. Two lookups are narrower than with Postgres: limits named in the loop's reasons come from the last 2 days (not 90), and the simulator lists the profiles switched to in the last 60 days (not a year). An agent reading Nightscout keeps the loop settings and the AI Test profile there, as documents `loopk-loop-settings` and `loopk-test-profiles` of its settings collection (saving them needs a token that may change settings there). The server itself always keeps its data in Postgres; `docs/modes.md` describes the static pages that run without it.
+![The profiles page: a profile's hours, insulin and sensitivity ratio, and its basal by hour of day against the basal delivered and the SMBs and boluses](docs/screenshots/profiles.png)
 
-## In the browser
 
-The simulator always runs in the browser (agents simulate through MCP, on the server or in their own Node, below): `public/localworker.js` runs the server's own Nightscout source over PGlite in a Web Worker and answers the simulator's requests there (`public/localapi.js` over `src/oref/api.js`). The server serves the browser-safe parts of `src/`, `/migrations.json` and PGlite under `/vendor/pglite/`, and keeps what is saved: `GET /api/simulate/stored` hands the worker the loop settings entered and the AI Test profile, and saving settings and the AI Test profile's routes stay on the server. Pages call `request()` (`public/local.js`) instead of `fetch()`:
+### Try a change before you make it in AAPS
 
-- Signed in to Loopk, the worker reads Loopk's own API v3 with the page's session, so the data comes from Loopk's server as for the other pages.
-- While a tab holds a Nightscout address and token (opened from `/direct-test`), the worker reads that server directly and answers the rest of Loopk's API too, so no data goes through Loopk's server. The Nightscout server needs CORS (`ENABLE` with `cors`).
+The simulator runs Loopk's ports of AAPS 3.4's algorithms (SMB, Dynamic ISF, AutoISF) on your own data:
 
-Keep modules under `src/analysis`, `data`, `oref`, `predict` and `sync` free of Node imports at load time.
+- **One decision:** "With SMB basal minutes at 45 instead of 30, or ISF 10% stronger, what would the loop have done at 14:05?" Loopk decides that run again, exactly as AAPS would, and shows what changes.
+- **A period:** "Had these settings been in place last week, how would glucose, lows, highs and insulin have looked?" Loopk doses the period again and estimates the glucose that would have followed, with a band for how sure it is.
 
-## Agents in their own Node
+Try a whole other profile as the **AI Test** profile and simulate with it; AAPS never sees it. When a change looks right, make it in AAPS yourself.
 
-The Access page offers agents loopk's MCP two ways: the endpoint on this server (`/mcp?token=`), or the same tools run by the agent itself, as a stdio MCP server in Node 20+ on its machine: `npx -y <loopk>/mcp/local-<version>.tgz` with `LOOPK_URL` and `LOOPK_TOKEN` (a read token is enough). `src/mcp/local.js` reads the data with the token into an in-memory Postgres, as the browser does, and answers every tool and simulation there; the server only sends the data and the code. The AI Test profile it writes is saved on the server (`PUT /api/simulate/test-profile`). With `NIGHTSCOUT_URL` and `NIGHTSCOUT_TOKEN` instead, it reads a Nightscout server directly and keeps loopk's settings there (saving needs a token that may change settings); `TZ_NAME` sets the person's time zone.
+![A day simulated with the ISF at 90 %: actual against simulated time in ranges, lows and insulin, and the simulated glucose and dosing over the actual day](docs/screenshots/simulate-period.png)
 
-`src/mcp/pack.js` builds the package in memory from what `local.js` imports, the migrations and the AAPS guide, with the packages they import at the server's versions. npx keeps a package it fetched from a URL, so `/mcp/local.json` names the current version's URL; any version's URL serves the current package, and an agent gets an update by being added again.
 
-## A test Nightscout
+### Ask an AI agent
 
-`scripts/nightscout-test.sh start` runs a real Nightscout (release v15.0.9, from source) on this machine for testing Loopk against: its own MongoDB on port 27018, Nightscout at http://localhost:1340 with CORS on (`ENABLE` with `cors`, any origin, as a browser reading Nightscout directly needs). The first start installs it into `.cache/` and writes its API secret and two access tokens, `loopk-read` (readable) and `loopk-admin` (admin), to `.cache/nightscout.env`; `stop` stops it. It starts empty: `SOURCE_URL=… SOURCE_TOKEN=… node scripts/nightscout-seed.js 30` copies the last 30 days of another server into it through API v3. That is health data, so keep it on this machine; `.cache/` is not in git. For data that is nobody's, `node scripts/nightscout-fake.js 14 --replace` makes up 14 days instead (a profile, CGM, meals, walks and a simple SMB loop with its device status) and replaces what the test Nightscout holds; `--dry-run` only prints a summary, and `SEED` picks another set.
+AI agents such as Claude Code, Codex or Gemini CLI can run Loopk's tools on their own computer, reading your Nightscout server directly. Ask them what you would ask an expert who has your data in front of them:
 
-Nightscout differs from a Loopk upstream: it has no heart rate collection (Loopk reads none from it), and only admin tokens may read its settings collection.
+- "Why did I go low last night, and what would have prevented it?"
+- "Is my ISF right in the mornings? Simulate last week with it 10% stronger."
+- "Write me a profile with a higher basal from 4 to 7 am, and show what it would have changed."
 
-## Tests
+The agent can read glucose, treatments, statistics, the profile, the loop's misses and each run's values, read how AAPS doses, simulate, and write an AI Test profile to simulate with. It cannot change anything in AAPS or Nightscout.
 
-`npm test` runs against `TEST_DATABASE_URL` (the `loopk_test` database); with `TEST_DATA_SOURCE=memory` it runs against an in-memory database instead, which needs no Postgres.
-
-## Production deployment
-
-The production layout on `ubuntu@outabout` uses the existing Dockerised Apache
-proxy and host-networked backend services. Loopk listens on private port 8084;
-the proxy is the only public entry point for `https://loopk.robertbuessow.com`.
-
-The server side - Postgres roles, the production `.env`, the Apache vhost and
-certificate, the CI deploy key - is set up by `outabout-infra`'s Ansible
-playbook. The one piece outside it is the Google Auth Platform **Web
-application** client, with the redirect URI
-`https://loopk.robertbuessow.com/auth/google/callback`; its client secret goes
-into the server's `.env` (see `outabout-infra`'s README, "Secrets").
-
-Deploy by pushing to the `production` branch:
+Add it with your Nightscout address and an access token there (Node 20 or later; Claude Code shown, the command for other agents is on https://loopk.cc):
 
 ```sh
-git push origin main:production
+claude mcp add --scope user loopk \
+  -e NIGHTSCOUT_URL=https://your.nightscout.example \
+  -e NIGHTSCOUT_TOKEN=<an access token on it> \
+  -- npx -y https://loopk.cc/mcp/local.tgz
 ```
 
-GitHub Actions builds the image, pushes it to `ghcr.io/buessow/loopk`,
-then SSHes to the server and runs `outabout-infra`'s
-`services/loopk/deploy.sh`, which pulls the image, applies all migrations
-(shipped in the image) before the new container starts, restarts the
-containers, and checks the backend endpoint. When migrations are pending,
-`setup-databases.sh` first dumps the production database to
-`~/loopk-backups/` on the server (restore with
-`sudo -u postgres pg_restore --clean --if-exists -d loopk <file>`). A
-migration that rewrites large tables locks them until it commits, so the
-running app waits during that time. The compose file, the `.env`
-template and the Apache vhost live in `outabout-infra`. The workflow needs
-the repo secrets `DEPLOY_HOST`, `DEPLOY_USER` and `DEPLOY_SSH_KEY`; on the
-server, that key is restricted to the deploy script by a forced command in
-`authorized_keys`, and `sudo docker login ghcr.io` (a classic token with only
-`read:packages`) lets it pull the private image.
+The screenshots show made-up data (`scripts/nightscout-fake.js`), on the full server's pages, which the static pages share.
 
-Production is monitored by the Netdata Agent on the host. Both containers log
-to the systemd journal, which Netdata shows in its Logs tab: filter on
-`SYSLOG_IDENTIFIER` `loopk` (one line per API request, with status and
-duration; 5xx responses at error priority) or `loopk-monitor`. Netdata's
-cgroups collector charts the containers' CPU, memory, and network use. The
-same image also runs `loopk-monitor`, a small Postgres freshness monitor that
-every ten seconds sends the delay since the newest glucose entry, heart-rate,
-treatment, and device-status record as StatsD gauges
-(`loopk.<collection>_sync_delay_seconds`) to Netdata on `127.0.0.1:8125`, and
-logs a line whenever one of them changes.
+## What you need
 
-The same push publishes the static pages at `https://loopk.cc` (`docs/modes.md`): the "Static pages" workflow runs `scripts/build-static.js`, which writes the MCP package an agent runs itself (`mcp/local-<version>.tgz`, named by `mcp/local.json`, keeping the last 10 published) and, for now, a page that shows how to add it; `--pages` adds the pages once they run without the full server. GitHub Pages serves it, with the repository's Pages source set to "GitHub Actions" and `loopk.cc` as its custom domain (in Cloudflare's DNS, `@` and `www` are CNAMEs to `buessow.github.io`, not proxied).
+- **AAPS uploading to Nightscout** (NSClient V3).
+- **CORS on Nightscout**, so your browser may read it from loopk.cc: `ENABLE` must include `cors`.
+- **An access token on Nightscout** with read access. Make one in Nightscout's admin tools.
+- **A browser with passkeys** to keep the token on your device; without them, you enter the token again in each new tab.
+
+## Your data stays yours
+
+- **Code only from loopk.cc.** loopk.cc is a set of static files on GitHub Pages, built from this repository. It has no server that could receive your data.
+- **Data only between your browser and your Nightscout.** Your browser reads Nightscout directly and keeps a copy on your device, so later visits load only what is new. Signing out deletes it.
+- **The token in a passkey.** The token is encrypted with a secret only your passkey can produce (after Face ID, a fingerprint or the device PIN), and kept on your device. It is sent only to Nightscout.
+- **Settings on your device.** The loop settings you enter for the simulator, the AI Test profile and your report dashboards stay in your browser. Export them as a file to move them to another device or to an agent.
+
+## Limits
+
+- Loopk informs; it does not replace medical advice. The period simulation is an estimate: read its band and its notes.
+- There are no glucose predictions of Loopk's own, and no heart rate (Nightscout has none).
+- claude.ai and other web-only AI apps cannot use Loopk's tools: they need a server to connect to. Use an agent on your computer, or run the full server.
+
+## Your own server
+
+Loopk can also run as a server with its own Postgres database, which AAPS uploads to instead of Nightscout, with Google sign-in, an MCP endpoint for claude.ai and predictions: see [docs/full-server.md](docs/full-server.md). How the two differ is in [docs/modes.md](docs/modes.md), and how to work on Loopk in [docs/development.md](docs/development.md).
 
 ## Licence
 
