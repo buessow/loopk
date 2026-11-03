@@ -7,6 +7,7 @@ import { Auth } from './auth/index.js';
 import { createApi2 } from './api2/index.js';
 import { createApi3 } from './api3/index.js';
 import { createSessionRoutes } from './web/session.js';
+import { cors } from './web/cors.js';
 import { createPredictionRoutes } from './predict/routes.js';
 import { ModelStore } from './predict/store.js';
 import { PredictionRecorder } from './predict/recorder.js';
@@ -61,8 +62,10 @@ export function createApp (ctx, { requestLog = false } = {}) {
     next();
   });
 
-  app.use('/api/v3', createApi3(ctx));
-  app.use('/api/v2', createApi2(ctx));
+  // The static pages read this server as they read Nightscout (src/web/cors.js).
+  const fromPages = cors(ctx.config.corsOrigins ?? []);
+  app.use('/api/v3', fromPages, createApi3(ctx));
+  app.use('/api/v2', fromPages, createApi2(ctx));
   app.use('/api/prediction', createPredictionRoutes(ctx));
   app.use('/api/reports', createReportRoutes(ctx));
   app.use('/api/analysis', createAnalysisRoutes(ctx));

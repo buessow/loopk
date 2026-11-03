@@ -90,6 +90,7 @@ The app's database roles can only read and write rows. Schema changes go in a ne
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth client (type "Web application") with redirect URI `<BASE_URL>/auth/google/callback` |
 | `ADMIN_EMAILS` | Google accounts that sign in as admin (can manage tokens and people on `/admin`) |
 | `ALLOWED_EMAILS` | Further accounts allowed to sign in read-only (admins can also add people on `/admin`) |
+| `CORS_ORIGINS` | Origins whose pages may read API v2 and v3 with an access token, comma-separated (default `https://loopk.cc`, so its static pages can sign in to this server as to a Nightscout; `none` for none). The session cookie is never allowed from them |
 | `FOLLOW_URL`, `FOLLOW_TOKEN` | Follow this Nightscout server with this access token (read is enough); see below |
 | `MONGO_URL` | Nightscout MongoDB, for the analysis and migration scripts |
 | `STATSD_HOST`, `STATSD_PORT` | Netdata StatsD server for the freshness monitor (default `127.0.0.1:8125`) |

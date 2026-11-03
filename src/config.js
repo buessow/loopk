@@ -33,5 +33,8 @@ export function loadConfig (env = process.env) {
     // Where people open loopk, for links to the glucose page in the MCP
     // server's answers; BASE_URL unless the server is reached elsewhere.
     publicUrl: (env.PUBLIC_URL || baseUrl).replace(/\/$/, ''),
+    // Origins whose pages may read API v2 and v3 with an access token, as
+    // they read Nightscout (the static pages); none with CORS_ORIGINS=none.
+    corsOrigins: env.CORS_ORIGINS === 'none' ? [] : (env.CORS_ORIGINS || 'https://loopk.cc').split(/[\s,]+/).map((s) => s.replace(/\/$/, '')).filter(Boolean),
   };
 }
