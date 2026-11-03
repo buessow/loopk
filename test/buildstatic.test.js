@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { latestPackage, mcpPackage } from '../src/mcp/pack.js';
+import { gzipSync } from 'node:zlib';
+import { latestPackage, mcpPackage, versionOf } from '../src/mcp/pack.js';
 
 // scripts/build-static.js: the static server's files (docs/modes.md).
 const build = (...args) => new Promise((resolve, reject) => {
@@ -70,8 +70,8 @@ test('a new build keeps the packages the published site holds, checked against t
     // the published site: an older package and the current one
     const live = path.join(dir, 'live');
     await build(live);
-    const old = Buffer.from('an older package');
-    const oldVersion = createHash('sha256').update(old).digest('hex').slice(0, 12);
+    const old = gzipSync(Buffer.from('an older package'));
+    const oldVersion = versionOf(Buffer.from('an older package'));
     await fs.writeFile(path.join(live, 'mcp', `local-${oldVersion}.tgz`), old);
     const { version } = await mcpPackage();
     const at = '2026-10-01T00:00:00.000Z';

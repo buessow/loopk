@@ -3,7 +3,7 @@
 // repository's layout so their relative imports hold, the files they read
 // (the migrations its in-memory Postgres needs, the AAPS guide), and a package.json with the packages they import
 // at this server's versions. Built in memory, once; the same files make the same
-// bytes (fixed times), so the etag changes only with the code.
+// tar (fixed times), so the version changes only with the code.
 
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -82,6 +82,12 @@ function entry (name, content, mode) {
 
 let built = null;
 
+/**
+ * A package's version: the start of the sha256 of its tar, not of the gzip,
+ * which another Node's zlib packs into other bytes.
+ */
+export const versionOf = (tar) => createHash('sha256').update(tar).digest('hex').slice(0, 12);
+
 /** The package as a gzipped tarball, with a version from its content: { tgz, version, etag, files, manifest }. */
 export function mcpPackage () {
   built ??= (async () => {
@@ -90,8 +96,9 @@ export function mcpPackage () {
     const parts = [entry('package/package.json', Buffer.from(JSON.stringify(pkg, null, 2) + '\n'), 0o644)];
     for (const f of files) parts.push(entry(`package/${f}`, await fs.readFile(path.join(root, f)), f === ENTRY ? 0o755 : 0o644));
     parts.push(Buffer.alloc(1024));
-    const tgz = zlib.gzipSync(Buffer.concat(parts), { level: 9 });
-    const version = createHash('sha256').update(tgz).digest('hex').slice(0, 12);
+    const tar = Buffer.concat(parts);
+    const tgz = zlib.gzipSync(tar, { level: 9 });
+    const version = versionOf(tar);
     return { tgz, version, etag: `"${version}"`, files, manifest: pkg };
   })().catch((err) => {
     built = null;
@@ -124,7 +131,7 @@ export function latestPackage () {
       Buffer.alloc(1024),
     ]);
     const tgz = zlib.gzipSync(tar, { level: 9 });
-    return { tgz, etag: `"${createHash('sha256').update(tgz).digest('hex').slice(0, 12)}"` };
+    return { tgz, etag: `"${versionOf(tar)}"` };
   })().catch((err) => {
     launcher = null;
     throw err;

@@ -13,13 +13,13 @@
 // and keeps the last KEEP of them, so an agent added with an older version's
 // URL can still install it. Agents added with mcp/local.tgz run the current one.
 
-import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 import { BROWSER_SOURCE } from '../src/app.js';
 import { readMigrations } from '../src/data/postgres/memory.js';
-import { latestPackage, mcpPackage } from '../src/mcp/pack.js';
+import { latestPackage, mcpPackage, versionOf } from '../src/mcp/pack.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // MCP packages kept, the current one included.
@@ -27,8 +27,6 @@ const KEEP = 10;
 // PGlite's files the browser does not load: source maps, types, the CommonJS
 // build and the Postgres extensions loopk does not use.
 const PGLITE_SKIP = /\.(map|d\.ts|d\.cts|cjs)$|\.tar\.gz$/;
-
-const versionOf = (tgz) => createHash('sha256').update(tgz).digest('hex').slice(0, 12);
 
 /** The packages `site` publishes now, checked against their names: [{ version, at, tgz }]. */
 async function published (site) {
@@ -40,7 +38,12 @@ async function published (site) {
     const tgz = await fetch(new URL(`/mcp/local-${version}.tgz`, site));
     if (!tgz.ok) continue;
     const bytes = Buffer.from(await tgz.arrayBuffer());
-    if (versionOf(bytes) !== version) throw new Error(`${site}: local-${version}.tgz does not match its name`);
+    let tar = null;
+    try {
+      tar = gunzipSync(bytes);
+    } catch { /* not a package at all */ }
+    // packages published before versions came from the tar are named by their gzip
+    if ((!tar || versionOf(tar) !== version) && versionOf(bytes) !== version) throw new Error(`${site}: local-${version}.tgz does not match its name`);
     kept.push({ version, at, tgz: bytes });
   }
   return kept;
