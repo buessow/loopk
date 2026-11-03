@@ -1,10 +1,11 @@
+import { localCredentials, request } from './local.js';
 import { setupTheme } from './theme.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 async function call (method, path, body) {
-  const res = await fetch(path, {
+  const res = await request(path, {
     method,
     credentials: 'same-origin',
     headers: body ? { 'Content-Type': 'application/json' } : {},
@@ -89,11 +90,12 @@ function mcpCommands (origin, accessToken) {
 }
 
 /**
- * How each agent runs loopk's MCP server itself with the token (src/mcp/local.js),
- * from the package at `pkg`, which starts the current version (src/mcp/latest.js).
+ * How each agent runs loopk's MCP server itself with the variables `env`
+ * (src/mcp/local.js: LOOPK_URL and LOOPK_TOKEN, or NIGHTSCOUT_URL and
+ * NIGHTSCOUT_TOKEN), from the package at `pkg`, which starts the current
+ * version (src/mcp/latest.js).
  */
-function localMcpCommands (origin, accessToken, pkg) {
-  const env = { LOOPK_URL: origin, LOOPK_TOKEN: accessToken };
+function localMcpCommands (env, pkg) {
   const pairs = Object.entries(env).map(([k, v]) => `${k}=${v}`);
   const config = { mcpServers: { loopk: { command: 'npx', args: ['-y', pkg], env } } };
   return [
@@ -114,9 +116,23 @@ async function showMcpCommands () {
   $('mcpServerText').hidden = agent;
   $('mcpAgentText').hidden = !agent;
   if (!agentToken) return;
-  const commands = agent
-    ? localMcpCommands(location.origin, agentToken, `${location.origin}/mcp/local.tgz`)
-    : mcpCommands(location.origin, agentToken);
+  renderMcpCommands(agent
+    ? localMcpCommands({ LOOPK_URL: location.origin, LOOPK_TOKEN: agentToken }, `${location.origin}/mcp/local.tgz`)
+    : mcpCommands(location.origin, agentToken));
+}
+
+/**
+ * In the browser (the static server): the agent reads the Nightscout server
+ * this tab signed in to, with its token. latest.js asks loopk.cc for the
+ * current package unless LOOPK_SITE names this site.
+ */
+function showStaticMcpCommands () {
+  const { url, token } = localCredentials();
+  const env = { NIGHTSCOUT_URL: url, NIGHTSCOUT_TOKEN: token, ...(location.origin === 'https://loopk.cc' ? {} : { LOOPK_SITE: location.origin }) };
+  renderMcpCommands(localMcpCommands(env, `${location.origin}/mcp/local.tgz`));
+}
+
+function renderMcpCommands (commands) {
   $('mcpResult').innerHTML = commands.map(([label, text], i) => `<div class="field">
       <label for="mcpCommand${i}">${esc(label)}</label>
       <div class="row" style="align-items:stretch;flex-wrap:nowrap"><input class="input mono" id="mcpCommand${i}" readonly value="${esc(text)}" style="flex:1;min-width:0"><button class="btn btn-secondary" type="button" data-copy-token="${esc(text)}">Copy</button></div>
@@ -130,7 +146,6 @@ try {
   const input = document.querySelector(`input[name=mcpWhere][value="${saved}"]`);
   if (input) input.checked = true;
 } catch { /* no storage: the default */ }
-showMcpCommands().catch(showError);
 for (const input of document.querySelectorAll('input[name=mcpWhere]')) {
   input.addEventListener('change', () => {
     try { localStorage.setItem(MCP_WHERE, mcpWhere()); } catch { /* not remembered */ }
@@ -347,7 +362,15 @@ async function main () {
     document.querySelectorAll('section').forEach((s) => { s.hidden = true; });
     throw new Error('Only admins can manage access.');
   }
-  await Promise.all([loadTokens(), loadUsers(), loadFollow(), loadSport()]);
+  if (session.inBrowser) {
+    // No server: tokens and people are Nightscout's, and there is nothing to follow into.
+    for (const id of ['tokensSection', 'usersSection', 'followSection', 'mcpWhereField', 'mcpServerText', 'mcpAgentText', 'mcpCreateRow']) $(id).hidden = true;
+    $('mcpStaticText').hidden = false;
+    showStaticMcpCommands();
+    await loadSport();
+    return;
+  }
+  await Promise.all([showMcpCommands(), loadTokens(), loadUsers(), loadFollow(), loadSport()]);
 }
 
 setupTheme($('themeToggle'));

@@ -8,12 +8,14 @@
 // LOOPK_URL, LOOPK_TOKEN: a loopk server and an access token on it (read is
 //   enough); the AI Test profile is saved there.
 // NIGHTSCOUT_URL, NIGHTSCOUT_TOKEN: a Nightscout server instead, read
-//   directly, with loopk's settings in its settings collection.
+//   directly, with loopk's settings (loop settings, the AI Test profile) in
+//   the JSON file LOOPK_SETTINGS (default ~/.config/loopk/settings.json),
+//   which the browser's "Export settings" writes and "Import settings" reads.
 // TZ_NAME: the person's time zone (default: the profile's).
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loopkSettings, nightscoutSource } from '../data/nightscout/index.js';
-import { upstreamSettings } from '../data/nightscout/settings.js';
+import { defaultSettingsFile, fileSettings } from './settingsfile.js';
 import { createMcpServer } from './tools.js';
 
 const env = process.env;
@@ -30,7 +32,7 @@ if (!url || !token) fail('set LOOPK_URL and LOOPK_TOKEN (or NIGHTSCOUT_URL and N
 
 let data;
 try {
-  data = await nightscoutSource({ url, token, settings: loopk ? loopkSettings : upstreamSettings });
+  data = await nightscoutSource({ url, token, settings: loopk ? loopkSettings : fileSettings(env.LOOPK_SETTINGS || defaultSettingsFile()) });
 } catch (err) {
   fail(err.message);
 }

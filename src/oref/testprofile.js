@@ -150,9 +150,12 @@ export async function copyTestProfile (ctx, { to, by, now = Date.now(), utcOffse
     srvCreated: now,
     srvModified: now,
   };
-  // Loaded here: API v3's identifiers need uuid, which the browser does not load.
-  const { resolveIdentifier } = await import('../api3/tools.js');
-  resolveIdentifier(copy);
+  // Loaded here: API v3's identifiers need uuid, which the browser does not
+  // load; a source over Nightscout writes it there, which makes the identifier.
+  if (!ctx.data.upstream) {
+    const { resolveIdentifier } = await import('../api3/tools.js');
+    resolveIdentifier(copy);
+  }
   const stored = await ctx.data.collection('profile').insert(copy);
   ctx.bus?.emit('storage-socket-create', { colName: 'profile', doc: stored });
   ctx.bus?.emit('data-received', { colName: 'profile' });

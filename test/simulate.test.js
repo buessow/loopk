@@ -8,10 +8,11 @@ import { glucoseStats } from '../src/oref/period.js';
 import { loadSettingsTimeline } from '../src/oref/settings.js';
 import { saveTestProfile, validProfile } from '../src/oref/testprofile.js';
 import { localApi } from '../public/localapi.js';
-import { loopkSettings, nightscoutSource } from '../src/data/nightscout/index.js';
+import { loopkSettings, memorySettings, nightscoutSource } from '../src/data/nightscout/index.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
 // The loop run the what-ifs decide again: glucose rising to 170 mg/dL.
 const T = Date.UTC(2026, 9, 20, 12);
 const auth = (t) => ({ Authorization: `Bearer ${t.jwt}` });
@@ -164,18 +165,71 @@ test('the browser simulates over the API as over the database', async () => {
 
 test('the browser answers the API itself on a Nightscout server', async () => {
   const upstream = async (path) => [{ path }];
-  const browser = (access) => localApi({ ...s.ctx.data, access }, { url: 'https://ns.example.com', upstream });
+  // loopk's settings in memory, as the worker keeps the page's
+  const browser = (access) => localApi({ ...s.ctx.data, ...memorySettings()(), access }, { url: 'https://ns.example.com', upstream });
   const reading = browser({ sub: 'watch', permissions: ['*:*:read'] });
   const session = (await reading({ path: '/api/session' })).body;
   assert.equal(session.user.email, 'watch@ns.example.com');
-  assert.equal(session.isAdmin, false);
+  // the settings are this browser's, so whoever reads may change them
+  assert.equal(session.isAdmin, true);
   assert.equal(session.inBrowser, true);
-  // Bad input, a reader saving settings, what it does not answer, and API v3 sent on.
+  assert.equal(session.predictions, false);
+  // Bad input, what it does not answer, and API v3 sent on.
   assert.equal((await reading({ method: 'POST', path: '/api/simulate/run', body: { time: 'soon' } })).status, 400);
-  assert.equal((await reading({ method: 'PUT', path: '/api/simulate/settings', body: { values: { max_iob: 3 } } })).status, 403);
-  assert.equal((await reading({ path: '/api/reports/hours' })).status, 404);
+  assert.equal((await reading({ path: '/api/prediction' })).status, 404);
   assert.deepEqual((await reading({ path: '/api/v3/entries?limit=1' })).body.result, [{ path: '/api/v3/entries?limit=1' }]);
-  assert.equal((await browser({ sub: 'admin', permissions: ['*'] })({ path: '/api/session' })).body.isAdmin, true);
+  // the reports and misses, as the server's routes answer them
+  for (const path of [`/api/reports/hours?from=${T - DAY}&to=${T}&tz=Europe%2FZurich`, `/api/reports/profiles?from=${T - DAY}&to=${T}&tz=Europe%2FZurich`, `/api/analysis/misses?from=${T - DAY}&to=${T}`]) {
+    const res = await request(s.app).get(path).set(auth(reader)).expect(200);
+    assert.deepEqual((await reading({ path })).body, res.body, path);
+  }
+  assert.equal((await reading({ path: '/api/reports/hours?tz=Nowhere' })).status, 400);
+  // sport mode goes to Nightscout: switching needs a token that may write treatments there
+  const sport = (await reading({ path: '/api/sport' })).body;
+  assert.equal(sport.canSwitch, false);
+  assert.match(sport.why, /may write treatments on ns\.example\.com/);
+  assert.equal((await reading({ method: 'POST', path: '/api/sport/start', body: {} })).status, 403);
+  assert.equal((await reading({ method: 'POST', path: '/api/simulate/test-profile/copy', body: { to: 'Default' } })).status, 403);
+});
+
+test('the browser keeps loopk\'s settings as one document, exported and imported whole', async () => {
+  const stores = memorySettings()();
+  const browser = localApi({ ...s.ctx.data, ...stores, access: { sub: 'watch', permissions: ['*:*:read'] } }, { url: 'https://ns.example.com', upstream: async () => [] });
+  const saved = await browser({ method: 'PUT', path: '/api/simulate/settings', body: { values: { max_iob: 3 }, validFrom: T - DAY } });
+  assert.equal(saved.status, 200);
+  assert.equal((await browser({ path: `/api/simulate/settings?at=${T}` })).body.values.max_iob, 3);
+  const flat = (v) => [[0, v]];
+  const test = { dia: 6, units: 'mg/dl', basal: flat(0.8), isf: flat(100), ic: flat(12), targetLow: flat(110), targetHigh: flat(110) };
+  assert.equal((await browser({ method: 'PUT', path: '/api/simulate/test-profile', body: { profile: test, note: 'weaker ISF' } })).status, 200);
+  assert.equal((await browser({ method: 'PUT', path: '/api/admin/sport', body: { percentage: 70, duration: 60, target: 140 } })).status, 200);
+
+  // the file "Export settings" writes
+  const exported = (await browser({ path: '/api/simulate/stored' })).body;
+  assert.equal(exported.version, 1);
+  assert.deepEqual(exported.loopSettings.map((r) => [r.setting, r.value, r.by]), [['max_iob', 3, 'watch@ns.example.com']]);
+  assert.equal(exported.testProfiles['AI Test'].note, 'weaker ISF');
+  assert.equal(exported.sport.config.percentage, 70);
+  assert.equal((await browser({ path: '/api/session' })).body.sport, true);
+
+  // imported into another browser
+  const other = localApi({ ...s.ctx.data, ...memorySettings()(), access: { sub: 'watch', permissions: ['*:*:read'] } }, { url: 'https://ns.example.com', upstream: async () => [] });
+  assert.equal((await other({ method: 'PUT', path: '/api/simulate/stored', body: JSON.parse(JSON.stringify(exported)) })).status, 200);
+  assert.deepEqual((await other({ path: '/api/simulate/stored' })).body, exported);
+  assert.equal((await other({ path: '/api/simulate/test-profile' })).body.profile.note, 'weaker ISF');
+  assert.equal((await other({ path: '/api/session' })).body.sport, true);
+
+  // what is not loopk's settings is refused, and changes nothing
+  for (const [body, why] of [
+    [[1, 2], /not a JSON object/],
+    [{ version: 2 }, /version 2 is newer/],
+    [{ loopSettings: [{ setting: 'max_iob', value: 'lots', validFrom: T }] }, /max_iob = "lots" is not a loop setting/],
+    [{ testProfiles: { 'AI Test': { profile: { ...test, dia: 1 } } } }, /the profile AI Test/],
+  ]) {
+    const res = await other({ method: 'PUT', path: '/api/simulate/stored', body });
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.match(res.body.message, why);
+  }
+  assert.deepEqual((await other({ path: '/api/simulate/stored' })).body, exported);
 });
 
 test('a stored profile can stand in for the one recorded', async () => {

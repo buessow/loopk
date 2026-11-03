@@ -7,15 +7,16 @@
 // loaded is refreshed with the server's history of changes at most once a
 // minute. The profile store is small and loaded whole. New documents (sport
 // mode, a copied profile) are written to the server; loopk's own API takes
-// none. loopk's settings are kept on the server too (settings.js); the rest
-// of its own state (tokens, people, dashboards) lives in memory only.
+// none. loopk's settings are a document the caller keeps (settings.js: in
+// the browser's localStorage, in an agent's file); the rest of its own state
+// (tokens, people, dashboards) lives in memory only.
 
 import { NightscoutClient } from '../../sync/client.js';
 import { prepare } from '../../sync/normalize.js';
 import { postgresSource } from '../postgres/index.js';
 import { Coverage } from './coverage.js';
-import { upstreamSettings } from './settings.js';
-export { loopkSettings } from './settings.js';
+import { memorySettings } from './settings.js';
+export { documentSettings, loopkSettings, memorySettings, settingsDocument } from './settings.js';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -118,9 +119,13 @@ const once = (holder, key, make) => {
   return holder[key];
 };
 
-/** Loads ranges of the server's collections into the cache, and its changes. */
+/**
+ * Loads ranges of the server's collections into the cache, and its changes.
+ * `kept` is what an earlier loader over the same cache had loaded (its
+ * state()); `onChange(state)` hears of each load, for a cache that is kept.
+ */
 class Loader {
-  constructor (client, cache) {
+  constructor (client, cache, { kept = null, onChange = null } = {}) {
     this.client = client;
     this.cache = cache;
     // profileEvents: the profile switches alone; a range of treatments holds them too
@@ -130,6 +135,27 @@ class Loader {
     this.cursor = now() - CLOCK_MARGIN; // history read from here on
     this.refreshed = now();
     this.loads = {};
+    this.onChange = onChange;
+    if (kept) {
+      for (const [c, ranges] of Object.entries(kept.coverage || {})) if (this.coverage[c]) this.coverage[c].ranges = ranges;
+      for (const c of kept.missing || []) this.missing.add(c);
+      this.cursor = kept.cursor;
+      // what changed since then is read first
+      this.refreshed = 0;
+    }
+  }
+
+  /** What is loaded: { coverage, cursor, missing }, for a later Loader over the same cache. */
+  state () {
+    return {
+      coverage: Object.fromEntries(Object.entries(this.coverage).map(([c, cov]) => [c, cov.ranges])),
+      cursor: this.cursor,
+      missing: [...this.missing],
+    };
+  }
+
+  changed () {
+    this.onChange?.(this.state());
   }
 
   /** One load of a collection after another, so they see each other's coverage. */
@@ -183,6 +209,7 @@ class Loader {
       });
     }
     this.cursor = newest;
+    this.changed();
   }
 
   /** Fetches [from, to) of `collection` (with `query`), piece by piece. */
@@ -222,6 +249,7 @@ class Loader {
           if (collection === 'treatments') this.coverage.profileEvents.add(a, b);
         }
         this.coverage[collection].add(a, b);
+        this.changed();
       }
     });
   }
@@ -292,14 +320,16 @@ const serverPool = async () => (await import('../postgres/memory.js')).memoryPoo
  * The Nightscout source for the server at `url`, read with the access token
  * `token` (none: the page's session, in the browser), over the in-memory
  * Postgres `pool()` makes, with loopk's settings from `settings(client)`
- * (on that server's settings collection; loopkSettings: a loopk server's
- * own). Throws a readable error if the server or the token does not work.
+ * (documentSettings, default in memory; loopkSettings: a loopk server's
+ * own). A cache `pool()` kept from before comes with `kept`, what was loaded
+ * into it, and `onChange(state)` hears of each load (Loader). Throws a
+ * readable error if the server or the token does not work.
  */
-export async function nightscoutSource ({ url, token, fetch, pageSize = 500, pool = serverPool, settings = upstreamSettings }) {
+export async function nightscoutSource ({ url, token, fetch, pageSize = 500, pool = serverPool, settings = memorySettings(), kept = null, onChange = null }) {
   const client = new NightscoutClient({ url, token, fetch, pageSize });
   await client.check();
   const cache = postgresSource(await pool());
-  const loader = new Loader(client, cache);
+  const loader = new Loader(client, cache, { kept, onChange });
 
   const reads = {};
   for (const [group, methods] of Object.entries(NEEDS)) {

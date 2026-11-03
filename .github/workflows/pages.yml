@@ -29,7 +29,7 @@ jobs:
 
       # Keeps the MCP packages published now, so agents added with an older
       # version's URL still install it.
-      - run: node scripts/build-static.js _site --keep-from=https://loopk.cc
+      - run: node scripts/build-static.js _site --pages --keep-from=https://loopk.cc
 
       - uses: actions/upload-pages-artifact@v3
         with:

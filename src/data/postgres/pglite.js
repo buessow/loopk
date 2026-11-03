@@ -30,10 +30,15 @@ export function pglitePool (db) {
   };
 }
 
-/** Applies the migrations [{ name, sql }], in order, to a new database. */
+/**
+ * Applies the migrations [{ name, sql }], in order, that the database has
+ * not had yet: all to a new one, the newer ones to one kept in the browser.
+ */
 export async function migrate (db, migrations) {
-  await db.exec('CREATE TABLE schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+  await db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+  const applied = new Set((await db.query('SELECT filename FROM schema_migrations')).rows.map((r) => r.filename));
   for (const { name, sql } of migrations) {
+    if (applied.has(name)) continue;
     await db.exec(sql);
     await db.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [name]);
   }

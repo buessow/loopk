@@ -23,9 +23,10 @@ import { latestPackage, mcpPackage } from './mcp/pack.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The parts of src/ the browser runs itself (public/localworker.js): the
-// data source over Nightscout and the simulator, which import nothing of
-// Node's there.
-export const BROWSER_SOURCE = ['analysis', 'data', 'oref', 'predict', 'sync'];
+// data source over Nightscout, the simulator, the reports, misses and sport
+// mode, and Nightscout's permissions, which import nothing of Node's there.
+export const BROWSER_SOURCE = ['analysis', 'auth/permissions.js', 'data', 'oref', 'predict', 'reports', 'sport', 'sync'];
+const browserSource = (file) => BROWSER_SOURCE.some((part) => file === part || file.startsWith(`${part}/`));
 
 export async function createContext (config, data) {
   const bus = new EventEmitter();
@@ -82,7 +83,7 @@ export function createPageRoutes () {
   const router = express.Router();
   const pub = path.join(root, 'public');
   router.get(['/login', '/admin', '/reports', '/profiles', '/simulate'], (req, res) => res.sendFile(path.join(pub, `${req.path.slice(1)}.html`)));
-  router.use('/src', (req, res, next) => (BROWSER_SOURCE.includes(req.path.split('/')[1]) ? next() : res.status(404).end()), express.static(path.join(root, 'src')));
+  router.use('/src', (req, res, next) => (browserSource(req.path.slice(1)) ? next() : res.status(404).end()), express.static(path.join(root, 'src')));
   router.use('/vendor/pglite', express.static(path.join(root, 'node_modules', '@electric-sql', 'pglite', 'dist')));
   let migrations;
   router.get('/migrations.json', async (req, res, next) => {

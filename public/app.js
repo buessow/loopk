@@ -6,6 +6,7 @@ import { loopRuns } from './loopruns.js';
 import { DEVICESTATUS_FIELDS, PAGE, TREATMENT_FIELDS, api, fetchRange, fetchSwitchBefore } from './documents.js';
 import { missNote, missSelection, missSummary } from './misses.js';
 import { OVERLAYS, parseView, viewSearch } from './view.js';
+import { request } from './local.js';
 import { applyChanges, cacheAvailable, cachedValue, clearCache, cursorFor, saveCursor, saveValue, useCacheFor } from './browser-cache.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1042,7 +1043,7 @@ function renderSport () {
   $('sportDurationField').hidden = on || !c;
   $('sportSwitch').textContent = on ? 'End now' : 'Start';
   $('sportSwitch').disabled = !s.canSwitch || (!on && !c);
-  if (!s.canSwitch) $('sportStatus').textContent = s.following ? `This server follows ${s.following}: switch sport mode there.` : 'Only admins can switch sport mode.';
+  if (!s.canSwitch) $('sportStatus').textContent = s.following ? `This server follows ${s.following}: switch sport mode there.` : s.why || 'Only admins can switch sport mode.';
   // Show it ended when it ends.
   clearTimeout(sportTimer);
   if (on && s.until) sportTimer = setTimeout(() => loadSport().catch(console.error), Math.max(0, s.until - Date.now()) + 5000);
@@ -1081,7 +1082,7 @@ function wireSport () {
     button.disabled = true;
     $('sportStatus').textContent = on ? 'Ending…' : 'Sending to AAPS…';
     try {
-      const res = await fetch(`/api/sport/${on ? 'stop' : 'start'}`, {
+      const res = await request(`/api/sport/${on ? 'stop' : 'start'}`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -1101,19 +1102,24 @@ function wireSport () {
 }
 
 async function main () {
-  const res = await fetch('/api/session', { credentials: 'same-origin' });
+  const res = await request('/api/session', { credentials: 'same-origin' });
   if (res.status === 401) {
     location.href = '/login';
     return;
   }
   const session = await res.json();
   await useCacheFor(session.user.email).catch(() => {});
-  $('adminLink').hidden = !session.isAdmin || session.keepsNothing;
+  $('adminLink').hidden = !session.isAdmin;
+  // No predictions where there is no server to keep a model (the static server).
+  if (session.predictions === false) {
+    state.showForecast = false;
+    $('showForecast').closest('label').hidden = true;
+  }
   // Sport mode, once an admin set it up (Access page).
   if (session.sport) loadSport().catch(console.error);
   $('signOut').addEventListener('click', async () => {
     await clearCache().catch(() => {});
-    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    await request('/auth/logout', { method: 'POST', credentials: 'same-origin' });
     location.href = '/login';
   });
 
@@ -1164,13 +1170,14 @@ async function main () {
     ensureLoaded().catch(console.error);
   }));
 
-  // Live updates over the storage socket; a periodic reload keeps the window sliding.
+  // Live updates over the storage socket (not in the browser: there is no
+  // server to send them); a periodic reload keeps the window sliding.
   let pending = null;
   const reload = () => {
     clearTimeout(pending);
     pending = setTimeout(() => loadRecent().catch(console.error), 500);
   };
-  if (window.io) {
+  if (window.io && !session.inBrowser) {
     const socket = window.io('/storage', { withCredentials: true });
     socket.on('connect', () => socket.emit('subscribe', { collections: ['entries', 'treatments', 'devicestatus', 'profile', 'heartrate'] }, () => {}));
     for (const ev of ['create', 'update', 'delete']) socket.on(ev, reload);

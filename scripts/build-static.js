@@ -13,6 +13,7 @@
 // and keeps the last KEEP of them, so an agent added with an older version's
 // URL can still install it. Agents added with mcp/local.tgz run the current one.
 
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +28,8 @@ const KEEP = 10;
 // PGlite's files the browser does not load: source maps, types, the CommonJS
 // build and the Postgres extensions loopk does not use.
 const PGLITE_SKIP = /\.(map|d\.ts|d\.cts|cjs)$|\.tar\.gz$/;
+// Pages for trying things out on the full server.
+const TEST_PAGES = /^(direct-test|passkey-test)\./;
 
 /** The packages `site` publishes now, checked against their names: [{ version, at, tgz }]. */
 async function published (site) {
@@ -64,13 +67,72 @@ async function writeMcp (dir, keepFrom) {
 }
 
 async function writePages (dir) {
-  await fs.cp(path.join(root, 'public'), dir, { recursive: true });
+  await fs.cp(path.join(root, 'public'), dir, {
+    recursive: true,
+    filter: (from) => !TEST_PAGES.test(path.relative(path.join(root, 'public'), from)),
+  });
   for (const part of BROWSER_SOURCE) await fs.cp(path.join(root, 'src', part), path.join(dir, 'src', part), { recursive: true });
   await fs.cp(path.join(root, 'node_modules', '@electric-sql', 'pglite', 'dist'), path.join(dir, 'vendor', 'pglite'), {
     recursive: true,
     filter: (from) => !PGLITE_SKIP.test(from),
   });
   await fs.writeFile(path.join(dir, 'migrations.json'), JSON.stringify(await readMigrations()));
+  // The pages answer everything in the browser (public/local.js)…
+  await fs.writeFile(path.join(dir, 'site.js'), `// Written by scripts/build-static.js: the static server (docs/modes.md).
+export const STATIC = true;
+`);
+  // …with no server to send live updates.
+  const index = path.join(dir, 'index.html');
+  await fs.writeFile(index, (await fs.readFile(index, 'utf8')).replace(/^<script src="\/socket\.io\/[^"]*"><\/script>\n/m, ''));
+  await writeServiceWorker(dir);
+}
+
+/** Every file under `dir` as a site path ('/a/b.js'), sorted. */
+async function siteFiles (dir) {
+  const out = [];
+  for (const entry of await fs.readdir(dir, { recursive: true, withFileTypes: true })) {
+    if (entry.isFile()) out.push('/' + path.relative(dir, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'));
+  }
+  return out.sort();
+}
+
+/**
+ * sw.js: keeps this version's code (every file but the MCP packages) in the
+ * browser, so the pages start without the network and run the same code
+ * until a new version is published; that one is fetched whole in the
+ * background and used once no page of the old one is open.
+ */
+async function writeServiceWorker (dir) {
+  const files = (await siteFiles(dir)).filter((f) => !f.startsWith('/mcp/'));
+  const hash = createHash('sha256');
+  for (const f of files) hash.update(f).update(await fs.readFile(path.join(dir, f)));
+  const version = `loopk-${hash.digest('hex').slice(0, 12)}`;
+  // the pages as their addresses name them: / and /simulate for index.html and simulate.html
+  const pages = files.filter((f) => f.endsWith('.html')).map((f) => (f === '/index.html' ? '/' : f.slice(0, -'.html'.length)));
+  await fs.writeFile(path.join(dir, 'sw.js'), `// Written by scripts/build-static.js: loopk's code of this version, kept in the browser.
+const VERSION = ${JSON.stringify(version)};
+const FILES = ${JSON.stringify([...pages, ...files])};
+
+self.addEventListener('install', (e) => {
+  e.waitUntil(caches.open(VERSION).then((cache) => cache.addAll(FILES)));
+});
+
+self.addEventListener('activate', (e) => {
+  e.waitUntil((async () => {
+    for (const key of await caches.keys()) if (key !== VERSION) await caches.delete(key);
+    await self.clients.claim();
+  })());
+});
+
+// This version's files from the browser; anything else (the MCP packages, a
+// file it does not have) from the network.
+self.addEventListener('fetch', (e) => {
+  const url = new URL(e.request.url);
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/mcp/')) return;
+  e.respondWith(caches.open(VERSION).then(async (cache) => (await cache.match(e.request, { ignoreSearch: true })) ?? fetch(e.request)));
+});
+`);
+  return { version, files };
 }
 
 /** Until the pages run without the full server: what is here, and how an agent adds loopk. */

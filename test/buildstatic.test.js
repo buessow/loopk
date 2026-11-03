@@ -53,15 +53,26 @@ test('the static site holds the current MCP package, named by mcp/local.json, th
   });
 });
 
-test('with --pages the static site holds the pages, the browser\'s part of src, PGlite and the migrations', async () => {
+test('with --pages the static site holds the pages, the browser\'s part of src, PGlite, the migrations and a service worker', async () => {
   await withDirs(async (dir) => {
     const site = path.join(dir, 'site');
     await build(site, '--pages');
-    for (const f of ['simulate.html', 'localworker.js', 'src/oref/api.js', 'src/data/nightscout/index.js', 'vendor/pglite/index.js', 'vendor/pglite/pglite.wasm', 'vendor/pglite/pglite.data']) await fs.access(path.join(site, f));
-    // nothing of the server's own
-    for (const f of ['src/auth', 'src/mcp', 'vendor/pglite/index.js.map', 'vendor/pglite/pgcrypto.tar.gz']) await assert.rejects(fs.access(path.join(site, f)), f);
+    for (const f of ['simulate.html', 'localworker.js', 'src/oref/api.js', 'src/data/nightscout/index.js', 'src/reports/profiles.js', 'src/sport/mode.js', 'src/auth/permissions.js', 'vendor/pglite/index.js', 'vendor/pglite/pglite.wasm', 'vendor/pglite/pglite.data']) await fs.access(path.join(site, f));
+    // nothing of the server's own, and no test pages
+    for (const f of ['src/auth/index.js', 'src/mcp', 'src/api3', 'vendor/pglite/index.js.map', 'vendor/pglite/pgcrypto.tar.gz', 'direct-test.html', 'passkey-test.js']) await assert.rejects(fs.access(path.join(site, f)), f);
     const migrations = await readJson(path.join(site, 'migrations.json'));
     assert.equal(migrations[0].name, '0001_init.sql');
+    // the pages know they are static, and wait for no live updates
+    assert.match(await fs.readFile(path.join(site, 'site.js'), 'utf8'), /export const STATIC = true;/);
+    assert.doesNotMatch(await fs.readFile(path.join(site, 'index.html'), 'utf8'), /socket\.io/);
+    // the service worker keeps every page and file but the MCP packages
+    const sw = await fs.readFile(path.join(site, 'sw.js'), 'utf8');
+    const files = JSON.parse(/const FILES = (\[.*\]);/.exec(sw)[1]);
+    for (const f of ['/', '/simulate', '/simulate.html', '/site.js', '/src/oref/api.js', '/vendor/pglite/pglite.wasm', '/migrations.json']) assert.ok(files.includes(f), f);
+    assert.ok(!files.some((f) => f.startsWith('/mcp/') || f === '/sw.js'));
+    // a new build of the same files is the same version
+    await build(path.join(dir, 'again'), '--pages');
+    assert.equal(/const VERSION = "(.*)";/.exec(await fs.readFile(path.join(dir, 'again', 'sw.js'), 'utf8'))[1], /const VERSION = "(.*)";/.exec(sw)[1]);
   });
 });
 

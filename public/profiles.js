@@ -7,6 +7,7 @@
 import { PERIODS, periodRange } from './reports-model.js';
 import { chartSeries, combinePcts, hourlyProfile, rowSummary } from './profiles-model.js';
 import { clearCache } from './browser-cache.js';
+import { request } from './local.js';
 import { setupTheme } from './theme.js';
 import { testDelta } from './testprofile-model.js';
 
@@ -68,7 +69,7 @@ function setStatus (text, warn = false) {
 }
 
 async function call (path, { method = 'GET', body } = {}) {
-  const res = await fetch(path, {
+  const res = await request(path, {
     method,
     credentials: 'same-origin',
     ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
@@ -404,17 +405,17 @@ function wire () {
 }
 
 async function main () {
-  const res = await fetch('/api/session', { credentials: 'same-origin' });
+  const res = await request('/api/session', { credentials: 'same-origin' });
   if (res.status === 401) {
     location.href = '/login';
     return;
   }
   const session = await res.json();
-  $('adminLink').hidden = !session.isAdmin || session.keepsNothing;
+  $('adminLink').hidden = !session.isAdmin;
   test.isAdmin = !!session.isAdmin;
   $('signOut').addEventListener('click', async () => {
     await clearCache().catch(() => {});
-    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    await request('/auth/logout', { method: 'POST', credentials: 'same-origin' });
     location.href = '/login';
   });
   setupTheme($('themeToggle'));

@@ -66,7 +66,8 @@
           <label for="extra">Further settings (JSON, by loopk's names, e.g. {"enableSMB_with_COB": true})</label>
           <textarea class="input" id="extra" rows="2" spellcheck="false"></textarea>
         </div>
-        <p class="simulate-save" id="saveRow" hidden><button class="btn btn-secondary" type="button" id="save">Save as my AAPS settings from this time on</button> <span class="text-muted">Admins: makes the changed values the baseline for every simulation from then on.</span></p>
+        <p class="simulate-save" id="saveRow" hidden><button class="btn btn-secondary" type="button" id="save">Save as my AAPS settings from this time on</button> <span class="text-muted" id="saveNote">Admins: makes the changed values the baseline for every simulation from then on.</span></p>
+        <p class="simulate-save"><button class="btn btn-ghost" type="button" id="exportSettings">Export settings</button><button class="btn btn-ghost" type="button" id="importSettings" hidden>Import settings</button><input type="file" id="importFile" accept=".json,application/json" hidden> <span class="text-muted" id="settingsFileNote">The loop settings entered here and the AI Test profile, as a file (loopk-settings.json).</span></p>
       </fieldset>
 
       <fieldset class="simulate-group">

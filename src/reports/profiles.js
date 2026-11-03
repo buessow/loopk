@@ -7,7 +7,6 @@
 // loop's sensitivity ratio (autosens or dynamic ISF, from devicestatus; above
 // 1 is less sensitive) is summed the same way.
 
-import { createHash } from 'node:crypto';
 import { basalRates, profileEvents, profileRates, roundHalfEven } from '../predict/grid.js';
 import { treatmentsBetween, zoneOffset } from '../predict/index.js';
 
@@ -36,7 +35,18 @@ const roundStat = (s) => ({ n: s.n, sum: round(s.sum), sumSq: round(s.sumSq) });
 /** Records with from <= date < to. */
 const within = (list, from, to) => (list || []).filter((r) => r.date >= from && r.date < to);
 
-const keyOf = (event) => createHash('sha1').update(`${event.name}\0${JSON.stringify(event.schedule)}`).digest('hex').slice(0, 12);
+/** 12 hex digits for a profile version (name and schedule): two 32-bit FNV-1a hashes, so the browser can make it too. */
+function keyOf (event) {
+  const text = `${event.name}\0${JSON.stringify(event.schedule)}`;
+  let a = 0x811c9dc5;
+  let b = 0x01000193;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c, 0x5bd1e995) >>> 0;
+  }
+  return (a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0')).slice(0, 12);
+}
 
 function newUsage (pct) {
   return {

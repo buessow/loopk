@@ -10,8 +10,9 @@ go, with `data/postgres/` mapping documents to Postgres and holding all SQL,
 contains session routes; `data/nightscout/` reads a Nightscout server for
 the browser and an agent's own MCP, never for the server. Features take the data source, never a pool. Browser assets are
 plain ES modules, HTML, and CSS in `public/`; `public/localworker.js` also runs
-the browser-safe parts of `src/` (analysis, data, oref, predict, sync: no Node
-imports at load time) to answer the API in the browser. `src/mcp/local.js`
+the browser-safe parts of `src/` (`BROWSER_SOURCE` in `src/app.js`: no Node
+imports at load time) to answer the API in the browser; on the static server
+(`public/site.js`, written by `scripts/build-static.js`) it answers all of it. `src/mcp/local.js`
 runs the MCP tools in an agent's own Node, from the package `src/mcp/pack.js`
 builds of what it imports: keep that import graph free of express and pg. Add schema changes as the next
 numbered SQL file in `migrations/`; do not alter applied migrations. Tests live

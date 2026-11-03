@@ -156,13 +156,31 @@ test('the server answers saving the AI Test profile for read tokens, checked, an
   await request(s.app).put('/api/simulate/test-profile').send({ profile }).expect(401);
 });
 
-test('reading a Nightscout server directly, a read token may not save there', async () => {
-  const { client, call } = await agent({ NIGHTSCOUT_URL: s.url, NIGHTSCOUT_TOKEN: reader.accessToken });
+test('reading a Nightscout server directly, the agent keeps loopk\'s settings in its settings file, as the browser exports them', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'loopk-settings-'));
+  const file = path.join(dir, 'loopk', 'settings.json');
+  // loop settings exported from a browser
+  await fs.mkdir(path.dirname(file));
+  await fs.writeFile(file, JSON.stringify({ version: 1, loopSettings: [{ setting: 'maxSMBBasalMinutes', value: 45, validFrom: t0 - 24 * HOUR }], testProfiles: {}, sport: null }));
+  const { client, call } = await agent({ NIGHTSCOUT_URL: s.url, NIGHTSCOUT_TOKEN: reader.accessToken, LOOPK_SETTINGS: file });
   try {
     assert.equal((await call('get_profile')).error, null);
-    assert.match((await call('set_test_profile', { based_on: 'P', note: 'x' })).error, /needs a token that may change settings/);
+    const settings = JSON.parse((await call('get_loop_settings', { at: new Date(t0).toISOString() })).text);
+    assert.equal(settings.values.maxSMBBasalMinutes, 45);
+    assert.equal(settings.sources.maxSMBBasalMinutes, 'entered');
+    assert.equal((await call('set_test_profile', { based_on: 'P', note: 'from the agent' })).error, null);
+    const kept = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(kept.version, 1);
+    assert.equal(kept.loopSettings[0].value, 45);
+    assert.equal(kept.testProfiles['AI Test'].note, 'from the agent');
+    // nothing was written to the server
+    assert.notEqual(await loadTestProfile(s.ctx.data).then((p) => p?.note ?? null), 'from the agent');
+    // a file that is not loopk's settings is named in the error
+    await fs.writeFile(file, '{"version": 9}');
+    assert.match((await call('get_test_profile')).error, /settings\.json: These are not loopk settings: version 9/);
   } finally {
     await client.close();
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });
 

@@ -7,6 +7,10 @@ import { Coverage } from '../src/data/nightscout/coverage.js';
 import { hourlyTotals } from '../src/reports/index.js';
 import { profileAt } from '../src/analysis/context.js';
 import { findMisses } from '../src/analysis/misses.js';
+import { PGlite } from '@electric-sql/pglite';
+import { memoryPool, readMigrations } from '../src/data/postgres/memory.js';
+import { migrate } from '../src/data/postgres/pglite.js';
+import { localApi } from '../public/localapi.js';
 
 // Another loopk plays the Nightscout server: what the Nightscout source
 // answers from its in-memory copy must match what that server's own
@@ -126,6 +130,50 @@ test('searches of the glucose page load their range; writes go to the server, wh
   }
 });
 
+test('a cache kept from before is used again: only what changed on the server since is read', async () => {
+  // the browser's database in IndexedDB, here one that outlives its sources
+  const pool = await memoryPool();
+  const keptPool = async () => ({ ...pool, end: async () => {} });
+  let state = null;
+  const first = await nightscoutSource({ url: s.url, token: reader.accessToken, pool: keptPool, onChange: (st) => { state = structuredClone(st); } });
+  await first.glucose.between(t0, t0 + DAY);
+  await first.close();
+  assert.deepEqual(state.coverage.entries, [[t0, t0 + DAY]]);
+
+  // a reading arrives meanwhile
+  const t = t0 + 6 * HOUR + 2000;
+  await post('entries', { type: 'sgv', date: t, sgv: 199, device: 'G7' });
+  const asked = [];
+  const fetch = (url, options) => {
+    asked.push(decodeURIComponent(String(url)));
+    return globalThis.fetch(url, options);
+  };
+  const again = await nightscoutSource({ url: s.url, token: reader.accessToken, pool: keptPool, kept: state, fetch });
+  try {
+    assert.deepEqual((await again.glucose.between(t, t + 1)).map((r) => r.sgv), [199]);
+    assert.deepEqual(await again.glucose.between(t0, t0 + DAY), await s.ctx.data.glucose.between(t0, t0 + DAY));
+    // the day kept is not read again: the reading came with the history of changes
+    assert.ok(!asked.some((u) => /\/api\/v3\/entries\?.*date\$gte/.test(u)), asked.join('\n'));
+    assert.ok(asked.some((u) => u.includes('/api/v3/entries/history/')));
+  } finally {
+    await again.close();
+    await pool.end();
+  }
+});
+
+test('migrations apply to a kept database only the ones it has not had', async () => {
+  const migrations = await readMigrations();
+  const db = await PGlite.create();
+  try {
+    await migrate(db, migrations.slice(0, 2));
+    await migrate(db, migrations);
+    await migrate(db, migrations);
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM schema_migrations')).rows[0].n, migrations.length);
+  } finally {
+    await db.close();
+  }
+});
+
 test('a wrong token is refused before anything is loaded', async () => {
   await assert.rejects(nightscoutSource({ url: s.url, token: 'nope-0000' }), /did not accept the access token/);
 });
@@ -141,5 +189,22 @@ test('a collection the server does not have, as Nightscout has no heart rate, re
     assert.equal((await plain.glucose.between(t0, t0 + HOUR)).length, 2);
   } finally {
     await plain.close();
+  }
+});
+
+test('sport mode switched in the browser writes its treatments to the server, which makes their identifiers', async () => {
+  const rw = await nightscoutSource({ url: s.url, token: writer.accessToken });
+  const api = localApi(rw, { url: s.url, upstream: (path) => rw.loader.client.get(path) });
+  try {
+    assert.equal((await api({ method: 'PUT', path: '/api/admin/sport', body: { percentage: 70, duration: 60, target: 140 } })).status, 200);
+    assert.equal((await api({ path: '/api/sport' })).body.canSwitch, true);
+    const started = await api({ method: 'POST', path: '/api/sport/start', body: { utcOffset: 60 } });
+    assert.equal(started.status, 200, JSON.stringify(started.body));
+    assert.equal(started.body.active, true);
+    const written = await s.ctx.data.collection('treatments').findMany({ filter: [{ field: 'device', operator: 'eq', value: 'loopk-sport' }], sort: { date: -1 }, limit: 5, onlyValid: true });
+    assert.deepEqual(written.map((t) => t.eventType).sort(), ['Profile Switch', 'Temporary Target']);
+    assert.ok(written.every((t) => t.identifier && t.enteredBy === `aaps@${new URL(s.url).host}`));
+  } finally {
+    await rw.close();
   }
 });

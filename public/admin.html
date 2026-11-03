@@ -24,7 +24,7 @@
     <button type="button" class="btn btn-secondary" id="themeToggle"></button>
   </nav>
 
-  <section style="display:flex;flex-direction:column;gap:var(--space-3)">
+  <section style="display:flex;flex-direction:column;gap:var(--space-3)" id="tokensSection">
     <h3 style="margin:0">Access tokens</h3>
     <p class="text-muted" style="margin:0">For apps and devices: enter the token as the NSClient “access token” in AAPS, which needs read &amp; write. Read is enough for apps that only display data. Upload model is for <code>modelling/export.py</code>: it can only upload glucose prediction models, not read or change data.</p>
     <form class="row" id="tokenForm">
@@ -39,14 +39,15 @@
 
   <section style="display:flex;flex-direction:column;gap:var(--space-3)" id="mcpSection">
     <h3 style="margin:0">Agents (MCP)</h3>
-    <div class="field"><label>Where it runs</label><div class="seg"><label class="seg-opt"><input type="radio" name="mcpWhere" value="server" checked>On this server</label><label class="seg-opt"><input type="radio" name="mcpWhere" value="agent">In the agent</label></div></div>
+    <div class="field" id="mcpWhereField"><label>Where it runs</label><div class="seg"><label class="seg-opt"><input type="radio" name="mcpWhere" value="server" checked>On this server</label><label class="seg-opt"><input type="radio" name="mcpWhere" value="agent">In the agent</label></div></div>
     <p class="text-muted" style="margin:0" id="mcpServerText">An AI agent such as Claude Code, Codex (ChatGPT) or Gemini CLI can read the data through this server’s MCP endpoint: glucose, treatments, statistics such as GMI and time in range, the profile, the loop’s misses and what the algorithm computed at each run, and simulate other settings. It cannot change anything that reaches the phone; it may write the “AI Test” profile, which stays in loopk until an admin copies it into a real profile on the Profiles page. The button creates a read-only token for it and the commands that add the server to each agent; in the ChatGPT app, turn on developer mode (Settings → Apps → Advanced settings) and create an app with the URL and no authentication. Delete the token above to take the access back.</p>
     <p class="text-muted" style="margin:0" id="mcpAgentText" hidden>The same tools, run by the agent itself: it runs loopk’s MCP server in Node 20 or later on its own machine (with <code>npx</code>, which fetches it from this server), reads the data its token may read, and looks things up and simulates there, so this server only sends it the data and the code. For agents that start programs, such as Claude Code, Codex CLI, Gemini CLI or Claude Desktop; the ChatGPT app and other web clients cannot. The AI Test profile it writes is still saved here. It runs loopk’s current version at each start.</p>
-    <div class="row"><button class="btn btn-primary" type="button" id="mcpCreate">Create agent token</button></div>
+    <p class="text-muted" style="margin:0" id="mcpStaticText" hidden>An AI agent such as Claude Code, Codex CLI, Gemini CLI or Claude Desktop can run loopk’s tools on its own computer, in Node 20 or later: it reads your Nightscout server directly with the token you signed in with, and looks things up and simulates there. The commands below hold that token: keep them to yourself. To simulate with the loop settings and AI Test profile kept in this browser, export them on the Simulate page and save the file as <code>~/.config/loopk/settings.json</code> on that computer (or name another file with <code>LOOPK_SETTINGS</code>); the AI Test profile the agent writes goes into that file, which Simulate can import. It runs loopk’s current version at each start.</p>
+    <div class="row" id="mcpCreateRow"><button class="btn btn-primary" type="button" id="mcpCreate">Create agent token</button></div>
     <div id="mcpResult" hidden style="flex-direction:column;gap:var(--space-3)"></div>
   </section>
 
-  <section style="display:flex;flex-direction:column;gap:var(--space-3)">
+  <section style="display:flex;flex-direction:column;gap:var(--space-3)" id="usersSection">
     <h3 style="margin:0">People</h3>
     <p class="text-muted" style="margin:0">Google accounts that may sign in to this site and see the data. Admins also manage access tokens and people here.</p>
     <form class="row" id="userForm">

@@ -433,6 +433,40 @@ async function run () {
   await render();
 }
 
+/** Downloads loopk's settings as loopk-settings.json (src/data/nightscout/settings.js). */
+async function exportSettings () {
+  try {
+    const stored = await call('/api/simulate/stored');
+    const doc = { version: 1, loopSettings: stored.loopSettings ?? [], testProfiles: stored.testProfiles ?? {}, sport: stored.sport ?? null };
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2) + '\n'], { type: 'application/json' }));
+    link.download = 'loopk-settings.json';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
+/** Replaces the settings kept in this browser with those of a file "Export settings" wrote. */
+async function importSettings (file) {
+  try {
+    let doc;
+    try {
+      doc = JSON.parse(await file.text());
+    } catch {
+      throw new Error(`${file.name} is not a JSON file`);
+    }
+    if (!confirm(`Replace the loop settings and the AI Test profile kept in this browser with those of ${file.name}?`)) return;
+    await call('/api/simulate/stored', doc, 'PUT');
+    await loadBaseline(state.mode === 'run' ? inputTime('runAt') : state.period.from);
+    await render();
+    setStatus('Imported');
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
 async function save () {
   const c = changes();
   if (!c.settings) return;
@@ -480,6 +514,13 @@ function wire () {
   $('algorithm').addEventListener('change', renderSettings);
   $('tempTarget').addEventListener('change', showTempTarget);
   $('save').addEventListener('click', save);
+  $('exportSettings').addEventListener('click', exportSettings);
+  $('importSettings').addEventListener('click', () => $('importFile').click());
+  $('importFile').addEventListener('change', (e) => {
+    const [file] = e.target.files;
+    e.target.value = '';
+    if (file) importSettings(file);
+  });
   $('reset').addEventListener('click', reset);
   wireChart($('runChart'));
   wireChart($('periodChart'));
@@ -494,7 +535,13 @@ async function main () {
   const session = await res.json();
   await useCacheFor(session.user?.email).catch(() => {});
   state.isAdmin = !!session.isAdmin;
-  $('adminLink').hidden = !session.isAdmin || session.keepsNothing;
+  $('adminLink').hidden = !session.isAdmin;
+  // In the browser the settings are this browser's: kept here, moved as a file.
+  if (session.inBrowser) {
+    $('importSettings').hidden = false;
+    $('saveNote').textContent = 'Kept in this browser: makes the changed values the baseline for every simulation from then on.';
+    $('settingsFileNote').textContent = 'The loop settings entered here and the AI Test profile, as a file (loopk-settings.json) for another browser, or for an agent as its LOOPK_SETTINGS.';
+  }
   $('signOut').addEventListener('click', async () => {
     await clearCache().catch(() => {});
     await request('/auth/logout', { method: 'POST', credentials: 'same-origin' });

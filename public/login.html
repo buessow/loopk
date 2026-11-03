@@ -15,6 +15,18 @@
     <h2 style="margin:0">Sign in</h2>
     <p class="text-muted" style="margin:0" id="googleNote">Use the Google account that was given access to this site.</p>
     <p class="error" id="error" hidden></p>
+    <div class="signin-form" id="vaultRow" hidden>
+      <button class="btn btn-primary" type="button" id="unlock">Sign in with your passkey</button>
+      <p class="text-muted" style="margin:0"><span id="vaultHost"></span> · <button class="btn btn-ghost" type="button" id="forget">Forget it on this device</button></p>
+    </div>
+    <form class="signin-form" id="nsForm" hidden>
+      <p class="text-muted" style="margin:0">loopk runs in this browser and reads your Nightscout server directly: your data and your token go nowhere else. Nightscout must allow it (<code>ENABLE</code> with <code>cors</code>).</p>
+      <div class="field"><label for="nsUrl">Nightscout address</label><input class="input" id="nsUrl" required placeholder="https://my.nightscout.example" autocomplete="url" inputmode="url" spellcheck="false"></div>
+      <div class="field"><label for="nsToken">Access token</label><input class="input mono" id="nsToken" required autocomplete="off" spellcheck="false" placeholder="loopk-0123456789abcdef"></div>
+      <p class="text-muted" style="margin:0">Make a token in Nightscout’s admin tools (Subjects) with the <span class="mono">readable</span> role; to switch sport mode from loopk, give it one that may also write treatments.</p>
+      <label class="check" id="keepField" hidden><input type="checkbox" id="keep" checked>Keep the token in a passkey on this device</label>
+      <button class="btn btn-primary" type="submit" id="nsGo">Sign in</button>
+    </form>
     <a class="btn btn-primary blueprint" href="/auth/google" id="google"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
       <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><path d="m10 17 5-5-5-5"></path><path d="M15 12H3"></path></svg>
       Sign in with Google

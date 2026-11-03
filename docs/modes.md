@@ -68,8 +68,11 @@ directory, and a GitHub Actions workflow publishes that directory to
 GitHub Pages:
 
 - `public/`, the pages;
-- the browser-safe parts of `src/`: `analysis`, `data`, `oref`, `predict`
-  and `sync`, as the full server serves them under `/src/`;
+- the browser-safe parts of `src/` (`BROWSER_SOURCE` in `src/app.js`:
+  `analysis`, `data`, `oref`, `predict`, `reports`, `sport`, `sync` and
+  `auth/permissions.js`), as the full server serves them under `/src/`;
+- `site.js` saying the pages are static (`STATIC = true`), and `sw.js`, the
+  service worker;
 - PGlite's browser files, about 16 MB, chiefly `pglite.wasm` and
   `pglite.data`;
 - `migrations.json`, written at build time instead of by a route;
@@ -117,8 +120,9 @@ the pages can keep their absolute paths (`/src/…`, `/vendor/…`).
    - A passkey belongs to the site's domain (its RP ID). If the static
      server moves to another domain, the token has to be entered again.
    - On a browser without PRF, the token is kept for the tab only
-     (`sessionStorage`), as `/direct-test` does today, and entered again in
-     a new tab.
+     (`sessionStorage`), and entered again in a new tab.
+   - Signing out ends the tab's sign-in and deletes the data this browser
+     keeps; the passkey stays, and the sign-in page can forget it.
 3. **Everything runs in the worker.** Every page sends its `/api/…` calls
    through `request()` (`public/local.js`). The worker answers all of them
    over the Nightscout data source in PGlite (`public/localapi.js`). This
@@ -129,17 +133,20 @@ the pages can keep their absolute paths (`/src/…`, `/vendor/…`).
    - misses;
    - the simulator.
 
-   Today only the simulator and the glucose page's documents go through
-   `request()`. The reports and profiles pages still call `fetch()`, and so
-   do the session, sign-out and sport-mode calls.
+   The Access page shows the agent commands and sport mode's setup; tokens,
+   people and following need the full server. Predictions are hidden.
 4. **Caching.**
-   - Data: the worker keeps what it has read in IndexedDB, so a later visit
-     loads only changes since its cursor, as the full server's browser
-     cache does now (`public/browser-cache.js`). PGlite can also persist to
-     IndexedDB itself. Signing out clears both.
-   - Code: the browser's HTTP cache, plus a service worker that keeps the
-     current version. That lets the pages start without the network, and
-     the code changes only when a new version is published.
+   - Data: the worker's PGlite is kept in IndexedDB (`idb://loopk-<hash of
+     the address>`), with what its loader has loaded and its history
+     cursor, so a later visit reads only what changed since. One tab at a
+     time keeps it (a Web Lock); others work in memory. A cache whose cursor
+     is more than a week old, or of an older format, starts again. The
+     glucose page's own document cache (`public/browser-cache.js`) works as
+     on the full server. Signing out deletes both.
+   - Code: a service worker (`sw.js`, written by the build) keeps every file
+     of the published version. The pages start without the network, and a
+     new version is fetched in the background and used once no page of the
+     old one is open.
 5. **CORS.** Nightscout must send CORS headers: `ENABLE` includes `cors`.
    The default origin is `*`; a Nightscout limited to some origins must
    include the static server's. The test Nightscout
@@ -198,17 +205,20 @@ file:
 
 - The browser exports one JSON file, `loopk-settings.json`, and imports one
   the same way. This is "Export settings" and "Import settings" on the
-  simulator page.
+  simulator page (`GET` and `PUT /api/simulate/stored`, which the worker
+  answers; the full server exports only).
 - The agent's settings file has the same format. Copy the exported file to
   `LOOPK_SETTINGS`, and the agent simulates with the person's loop settings.
   When it saves an AI Test profile, that profile is written to the file,
   which the browser can import.
-- The format is what `GET /api/simulate/stored` returns today:
-  `{ loopSettings, testProfiles, sport }`. A file in that format with a
-  `version` field can be read by both the browser and the agent.
-- In code, both are stores over a get and a put of whole values, like
-  `upstreamSettings` in `src/data/nightscout/settings.js`. One reads and
-  writes `localStorage`, the other the file.
+- The format is `{ version: 1, loopSettings, testProfiles, sport }`
+  (`settingsDocument` in `src/data/nightscout/settings.js`), what `GET
+  /api/simulate/stored` returns. A newer version is refused, not misread;
+  an import is checked as the simulator reads it.
+- In code, both are `documentSettings({ load, save })` over the whole
+  document. In the browser the worker keeps it for the page, which writes
+  `localStorage` (other tabs hear of it); `src/mcp/settingsfile.js` reads
+  and writes the agent's file.
 - Sport mode's configuration (percentage, duration, target) is kept in
   `localStorage` like the rest. Switching it on writes a Profile Switch and
   a Temporary Target to Nightscout's treatments, as on the full server
@@ -271,19 +281,18 @@ file:
 
 ## Order of work
 
-1. Done: removed the server variant over Nightscout (`src/passthrough/`,
+All done:
+
+1. Removed the server variant over Nightscout (`src/passthrough/`,
    `DATA_SOURCE=nightscout`, the token sign-in, `src/auth/seal.js`).
-   `src/data/nightscout/` stays; `upstreamSettings` goes with step 2.
-2. Make the settings stores over `localStorage` (browser) and a file
-   (agent), with export and import on the simulator page and
-   `LOOPK_SETTINGS` in `src/mcp/local.js`, replacing `upstreamSettings`.
-3. Make the worker answer every page's calls: reports, profiles, session,
-   sign-out and sport mode. Move the remaining `fetch()` calls to
-   `request()`.
-4. Add sign-in for the static server: the Nightscout address and token, the
-   passkey vault, and the agent commands.
-5. Build step and Pages workflow:
-   - write the static directory: `migrations.json`, the MCP package,
-     PGlite's browser files;
-   - add a service worker for the code;
-   - add the IndexedDB cache for the data.
+2. Settings stores over `localStorage` (browser) and a file (agent), with
+   export and import on the simulator page and `LOOPK_SETTINGS` in
+   `src/mcp/local.js`.
+3. The worker answers every page's calls (`public/localapi.js`), and the
+   pages send them through `request()`.
+4. Sign-in for the static server (`public/login.js`): the Nightscout
+   address and token, the passkey vault, and the agent commands on the
+   Access page.
+5. The build (`scripts/build-static.js --pages`, run by the "Static pages"
+   workflow): the pages, the service worker and the MCP package, and the
+   worker's database kept in IndexedDB.

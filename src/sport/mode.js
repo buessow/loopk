@@ -2,9 +2,8 @@
 // temp target on the Access page; the glucose page switches it on and off.
 // Switching writes a Profile Switch and a Temporary Target to treatments as
 // AAPS uploads them, and AAPS applies them when it receives them (NSClient:
-// receive profile switches and temp targets).
-
-import { resolveIdentifier } from '../api3/tools.js';
+// receive profile switches and temp targets). Without Node's modules, so the
+// browser runs it over Nightscout too (public/localapi.js).
 
 const MIN = 60000;
 const APP = 'loopk';
@@ -200,16 +199,21 @@ export class SportMode {
     return this.state(now);
   }
 
-  /** Stores treatments as APIv3 would and tells the sockets (AAPS) about them. */
+  /**
+   * Stores treatments as APIv3 would and tells the sockets (AAPS) about them.
+   * A source over Nightscout writes them there, which makes the identifiers.
+   */
   async write (docs) {
     if (this.ctx.follower) throw new SportError(409, `This server follows ${this.ctx.follower.url} and accepts no changes`);
+    // Loaded here: API v3's identifiers need uuid, which the browser does not load.
+    const { resolveIdentifier } = this.data.upstream ? {} : await import('../api3/tools.js');
     for (const doc of docs) {
       doc.created_at = new Date(doc.date).toISOString();
       doc.srvCreated = doc.srvModified = Date.now();
-      resolveIdentifier(doc);
+      resolveIdentifier?.(doc);
       const stored = await this.treatments.insert(doc);
-      this.ctx.bus.emit('storage-socket-create', { colName: 'treatments', doc: stored });
-      this.ctx.bus.emit('data-received', { colName: 'treatments' });
+      this.ctx.bus?.emit('storage-socket-create', { colName: 'treatments', doc: stored });
+      this.ctx.bus?.emit('data-received', { colName: 'treatments' });
     }
   }
 }

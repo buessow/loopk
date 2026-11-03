@@ -4,8 +4,6 @@ A Nightscout add-on for AAPS: better reporting, and simulation of changes to the
 
 Open **https://loopk.cc**, enter your Nightscout address and an access token, and Loopk shows what your loop did, where it got it wrong, and what other settings would have done. Everything runs in your browser and reads straight from your Nightscout server: no Loopk server ever sees your data or your token.
 
-> **Status:** the browser pages are being built. Today, loopk.cc offers Loopk's tools for AI agents ([below](#ask-an-ai-agent)).
-
 ## What you can do with it
 
 ### See what happened
@@ -77,7 +75,7 @@ AI agents such as Claude Code, Codex or Gemini CLI can run Loopk's tools on thei
 
 The agent can read glucose, treatments, statistics, the profile, the loop's misses and each run's values, read how AAPS doses, simulate, and write an AI Test profile to simulate with. It cannot change anything in AAPS or Nightscout.
 
-Add it with your Nightscout address and an access token there (Node 20 or later; Claude Code shown, the command for other agents is on https://loopk.cc):
+Add it with your Nightscout address and an access token there (Node 20 or later; Claude Code shown). Signed in on loopk.cc, the Access page shows the commands for Claude Code, Codex, Gemini CLI and Claude Desktop, filled in:
 
 ```sh
 claude mcp add --scope user loopk \
@@ -85,6 +83,8 @@ claude mcp add --scope user loopk \
   -e NIGHTSCOUT_TOKEN=<an access token on it> \
   -- npx -y https://loopk.cc/mcp/local.tgz
 ```
+
+It runs Loopk's current version at each start. To simulate with the loop settings you entered in the browser, export them on the Simulate page and save the file as `~/.config/loopk/settings.json` on that computer; an AI Test profile the agent writes goes into the same file, which the Simulate page can import.
 
 The screenshots show made-up data (`scripts/nightscout-fake.js`), on the full server's pages, which the static pages share.
 
@@ -100,7 +100,7 @@ The screenshots show made-up data (`scripts/nightscout-fake.js`), on the full se
 - **Code only from loopk.cc.** loopk.cc is a set of static files on GitHub Pages, built from this repository. It has no server that could receive your data.
 - **Data only between your browser and your Nightscout.** Your browser reads Nightscout directly and keeps a copy on your device, so later visits load only what is new. Signing out deletes it.
 - **The token in a passkey.** The token is encrypted with a secret only your passkey can produce (after Face ID, a fingerprint or the device PIN), and kept on your device. It is sent only to Nightscout.
-- **Settings on your device.** The loop settings you enter for the simulator, the AI Test profile and your report dashboards stay in your browser. Export them as a file to move them to another device or to an agent.
+- **Settings on your device.** The loop settings you enter for the simulator, the AI Test profile and your report dashboards stay in your browser. Export the loop settings and the AI Test profile as a file to move them to another browser or to an agent.
 
 ## Limits
 

@@ -10,6 +10,7 @@ import {
   normalizeDashboard, periodLabel, periodRange, unitOf, widgetData,
 } from './reports-model.js';
 import { clearCache } from './browser-cache.js';
+import { request } from './local.js';
 import { setupTheme } from './theme.js';
 
 const $ = (id) => document.getElementById(id);
@@ -60,7 +61,7 @@ function setStatus (text, warn = false) {
 }
 
 async function call (method, path, body) {
-  const res = await fetch(path, {
+  const res = await request(path, {
     method,
     credentials: 'same-origin',
     headers: body ? { 'Content-Type': 'application/json' } : {},
@@ -115,7 +116,7 @@ async function ensureData (force = false) {
 
 // --- saving ----------------------------------------------------------------
 
-// A server that keeps nothing keeps no dashboards: this browser does.
+// In the browser (the static server), dashboards are kept in this browser.
 const DASHBOARD_KEY = 'loopk.dashboard';
 
 function browserDashboard () {
@@ -449,16 +450,16 @@ function wire () {
 }
 
 async function main () {
-  const res = await fetch('/api/session', { credentials: 'same-origin' });
+  const res = await request('/api/session', { credentials: 'same-origin' });
   if (res.status === 401) {
     location.href = '/login';
     return;
   }
   const session = await res.json();
-  $('adminLink').hidden = !session.isAdmin || session.keepsNothing;
+  $('adminLink').hidden = !session.isAdmin;
   $('signOut').addEventListener('click', async () => {
     await clearCache().catch(() => {});
-    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    await request('/auth/logout', { method: 'POST', credentials: 'same-origin' });
     location.href = '/login';
   });
   setupTheme($('themeToggle'));
@@ -474,7 +475,7 @@ async function main () {
   }, $('grid'));
 
   try {
-    state.inBrowser = !!session.keepsNothing;
+    state.inBrowser = !!session.inBrowser;
     const saved = state.inBrowser ? browserDashboard() : await call('GET', '/api/reports/dashboard');
     state.dashboard = saved ? normalizeDashboard(saved) : defaultDashboard();
   } catch (err) {

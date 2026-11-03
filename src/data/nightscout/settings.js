@@ -1,56 +1,75 @@
-// loopk's own settings over a Nightscout server: the loop settings and AI
-// Test profile entered for the simulator, and sport mode. A source that
-// keeps nothing keeps them on that server, as one document each in its
-// settings collection, so every caller and every restart sees them.
-// Tokens that may not read settings there see none; saving needs one that
-// may change them (an admin token on Nightscout). The rows come back as the
-// Postgres stores return them (postgres/state.js).
+// loopk's own settings where no loopk server keeps them: the loop settings
+// and AI Test profile entered for the simulator, and sport mode. They are one
+// document, { version, loopSettings, testProfiles, sport }, read and written
+// whole (documentSettings): in the browser it is kept in localStorage
+// (public/localworker.js, through the page), for an agent's own MCP in a file
+// (src/mcp/settingsfile.js), otherwise in memory. "Export settings" writes
+// the same document and "Import settings" reads it, so a file moves the
+// settings between a browser and an agent. Nothing goes to Nightscout's
+// settings collection, which only admin tokens may read. The rows come back
+// as the Postgres stores return them (postgres/state.js).
 //
 // loopkSettings: the same stores read from a loopk server's own (GET
 // /api/simulate/stored), for the browser's worker on that server, which
 // leaves saving to the server's routes, and for an agent's own MCP
 // (src/mcp/local.js), which saves the AI Test profile through them.
 
-const IDS = { loopSettings: 'loopk-loop-settings', testProfiles: 'loopk-test-profiles', sport: 'loopk-sport' };
+// The settings document's format; a newer one is refused, not misread.
+export const SETTINGS_VERSION = 1;
 // Read again after this long, for changes another caller made.
 const FRESH = 60000;
-const NONE = /HTTP (401|403|404|410)\b/;
 
-export function upstreamSettings (client) {
-  const read = new Map();
-  // A document's date, which Nightscout does not let a change alter.
-  const dates = new Map();
+const notSettings = (why) => Object.assign(new Error(`These are not loopk settings: ${why}`), { status: 400, expose: true });
+const isObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 
-  async function get (kind) {
-    const hit = read.get(kind);
-    if (hit && Date.now() - hit.at < FRESH) return hit.value;
-    let value = null;
-    try {
-      const doc = await client.get(`/api/v3/settings/${IDS[kind]}`);
-      value = doc?.loopk ?? null;
-      if (doc?.date) dates.set(kind, doc.date);
-    } catch (err) {
-      if (!NONE.test(err.message)) throw err;
-    }
-    read.set(kind, { at: Date.now(), value });
-    return value;
+/** The settings document `value` checked for its shape: { version, loopSettings, testProfiles, sport }. */
+export function settingsDocument (value) {
+  if (!isObject(value)) throw notSettings('not a JSON object');
+  const version = value.version ?? SETTINGS_VERSION;
+  if (!Number.isInteger(version) || version < 1) throw notSettings('version must be a whole number');
+  if (version > SETTINGS_VERSION) throw notSettings(`version ${version} is newer than this loopk reads (${SETTINGS_VERSION})`);
+  const { loopSettings = [], testProfiles = {}, sport = null } = value;
+  if (!Array.isArray(loopSettings) || !loopSettings.every((r) => isObject(r) && typeof r.setting === 'string' && Number.isFinite(r.validFrom))) {
+    throw notSettings('loopSettings must be a list of { setting, value, validFrom }');
   }
-
-  async function put (kind, value) {
-    if (!dates.has(kind)) await get(kind);
-    const date = dates.get(kind) ?? Date.now();
-    try {
-      await client.put(`/api/v3/settings/${IDS[kind]}`, { identifier: IDS[kind], app: 'loopk', date, utcOffset: 0, loopk: value });
-      dates.set(kind, date);
-    } catch (err) {
-      // expose: the message is for the caller (the MCP tools and routes pass it on).
-      if (/HTTP (401|403)\b/.test(err.message)) throw Object.assign(new Error(`Saving needs a token that may change settings on ${client.url}, which keeps loopk's`), { status: 403, expose: true });
-      throw err;
-    }
-    read.set(kind, { at: Date.now(), value });
+  if (!isObject(testProfiles) || !Object.values(testProfiles).every((t) => isObject(t) && isObject(t.profile))) {
+    throw notSettings('testProfiles must name objects with a profile');
   }
+  if (sport != null && !(isObject(sport) && isObject(sport.config))) throw notSettings('sport must be null or { config }');
+  return { version: SETTINGS_VERSION, loopSettings, testProfiles, sport };
+}
 
-  return settingStores(get, put);
+/**
+ * The stores over one settings document, which `load()` reads (null: none
+ * yet) and `save(doc)` replaces. Also `settingsDocument.get()` and `.put(doc)`
+ * of the whole, for export and import. A data source's `settings` option.
+ */
+export function documentSettings ({ load, save }) {
+  let tail = Promise.resolve();
+  // One change after another, each over the document as the one before left it.
+  const change = (fn) => {
+    const run = tail.then(async () => {
+      const doc = settingsDocument(await load() ?? {});
+      await save(settingsDocument(fn(doc)));
+    });
+    tail = run.catch(() => {});
+    return run;
+  };
+  const get = async (kind) => (await load())?.[kind] ?? null;
+  const put = (kind, value) => change((doc) => ({ ...doc, [kind]: value }));
+  return () => ({
+    ...settingStores(get, put),
+    settingsDocument: {
+      get: async () => settingsDocument(await load() ?? {}),
+      put: (doc) => change(() => settingsDocument(doc)),
+    },
+  });
+}
+
+/** Settings kept in memory only, starting from the document `initial`. */
+export function memorySettings (initial = null) {
+  let doc = initial;
+  return documentSettings({ load: async () => doc, save: async (value) => { doc = value; } });
 }
 
 /** The stores of a loopk server's settings, read only (saving is the server's). */
@@ -76,7 +95,7 @@ export function loopkSettings (client) {
         try {
           await client.put('/api/simulate/test-profile', { profile, basedOn, note });
         } catch (err) {
-          // What the server refused, for the caller (as upstreamSettings' put).
+          // What the server refused, for the caller, with its status.
           const [, status, reason] = /HTTP (4\d\d)(?: \((.*)\))?$/.exec(err.message) ?? [];
           if (status) throw Object.assign(new Error(reason || err.message), { status: Number(status), expose: true });
           throw err;
