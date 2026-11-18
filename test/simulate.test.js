@@ -184,11 +184,7 @@ test('the browser answers the API itself on a Nightscout server', async () => {
     assert.deepEqual((await reading({ path })).body, res.body, path);
   }
   assert.equal((await reading({ path: '/api/reports/hours?tz=Nowhere' })).status, 400);
-  // sport mode goes to Nightscout: switching needs a token that may write treatments there
-  const sport = (await reading({ path: '/api/sport' })).body;
-  assert.equal(sport.canSwitch, false);
-  assert.match(sport.why, /may write treatments on ns\.example\.com/);
-  assert.equal((await reading({ method: 'POST', path: '/api/sport/start', body: {} })).status, 403);
+  // a profile copy goes to Nightscout: it needs a token that may write profiles there
   assert.equal((await reading({ method: 'POST', path: '/api/simulate/test-profile/copy', body: { to: 'Default' } })).status, 403);
 });
 
@@ -201,22 +197,23 @@ test('the browser keeps loopk\'s settings as one document, exported and imported
   const flat = (v) => [[0, v]];
   const test = { dia: 6, units: 'mg/dl', basal: flat(0.8), isf: flat(100), ic: flat(12), targetLow: flat(110), targetHigh: flat(110) };
   assert.equal((await browser({ method: 'PUT', path: '/api/simulate/test-profile', body: { profile: test, note: 'weaker ISF' } })).status, 200);
-  assert.equal((await browser({ method: 'PUT', path: '/api/admin/sport', body: { percentage: 70, duration: 60, target: 140 } })).status, 200);
 
   // the file "Export settings" writes
   const exported = (await browser({ path: '/api/simulate/stored' })).body;
   assert.equal(exported.version, 1);
   assert.deepEqual(exported.loopSettings.map((r) => [r.setting, r.value, r.by]), [['max_iob', 3, 'watch@ns.example.com']]);
   assert.equal(exported.testProfiles['AI Test'].note, 'weaker ISF');
-  assert.equal(exported.sport.config.percentage, 70);
-  assert.equal((await browser({ path: '/api/session' })).body.sport, true);
+  assert.equal(exported.sport, undefined);
 
   // imported into another browser
   const other = localApi({ ...s.ctx.data, ...memorySettings()(), access: { sub: 'watch', permissions: ['*:*:read'] } }, { url: 'https://ns.example.com', upstream: async () => [] });
   assert.equal((await other({ method: 'PUT', path: '/api/simulate/stored', body: JSON.parse(JSON.stringify(exported)) })).status, 200);
   assert.deepEqual((await other({ path: '/api/simulate/stored' })).body, exported);
   assert.equal((await other({ path: '/api/simulate/test-profile' })).body.profile.note, 'weaker ISF');
-  assert.equal((await other({ path: '/api/session' })).body.sport, true);
+  // sport mode in a file exported before it was removed is left out
+  const older = { ...exported, sport: { config: { percentage: 70 } } };
+  assert.equal((await other({ method: 'PUT', path: '/api/simulate/stored', body: older })).status, 200);
+  assert.deepEqual((await other({ path: '/api/simulate/stored' })).body, exported);
 
   // what is not loopk's settings is refused, and changes nothing
   for (const [body, why] of [

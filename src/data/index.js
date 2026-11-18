@@ -10,7 +10,7 @@
 //   heartrate               a source that loads on demand fetches what a
 //                           range needs first
 //   serverKey, subjects,    loopk's own state: access, the followed server,
-//   users, follow, sport,   sport mode, simulator settings, dashboards and
+//   users, follow,          simulator settings, dashboards and
 //   loopSettings,           predictions (postgres/state.js)
 //   testProfiles,
 //   dashboards, models,

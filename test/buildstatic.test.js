@@ -57,7 +57,7 @@ test('with --pages the static site holds the pages, the browser\'s part of src, 
   await withDirs(async (dir) => {
     const site = path.join(dir, 'site');
     await build(site, '--pages');
-    for (const f of ['simulate.html', 'localworker.js', 'src/oref/api.js', 'src/data/nightscout/index.js', 'src/reports/profiles.js', 'src/sport/mode.js', 'src/auth/permissions.js', 'vendor/pglite/index.js', 'vendor/pglite/pglite.wasm', 'vendor/pglite/pglite.data']) await fs.access(path.join(site, f));
+    for (const f of ['simulate.html', 'localworker.js', 'src/oref/api.js', 'src/data/nightscout/index.js', 'src/reports/profiles.js', 'src/auth/permissions.js', 'vendor/pglite/index.js', 'vendor/pglite/pglite.wasm', 'vendor/pglite/pglite.data']) await fs.access(path.join(site, f));
     // nothing of the server's own, and no test pages
     for (const f of ['src/auth/index.js', 'src/mcp', 'src/api3', 'vendor/pglite/index.js.map', 'vendor/pglite/pgcrypto.tar.gz', 'direct-test.html', 'passkey-test.js']) await assert.rejects(fs.access(path.join(site, f)), f);
     const migrations = await readJson(path.join(site, 'migrations.json'));

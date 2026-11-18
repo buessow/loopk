@@ -69,7 +69,7 @@ GitHub Pages:
 
 - `public/`, the pages;
 - the browser-safe parts of `src/` (`BROWSER_SOURCE` in `src/app.js`:
-  `analysis`, `data`, `oref`, `predict`, `reports`, `sport`, `sync` and
+  `analysis`, `data`, `oref`, `predict`, `reports`, `sync` and
   `auth/permissions.js`), as the full server serves them under `/src/`;
 - `site.js` saying the pages are static (`STATIC = true`), and `sw.js`, the
   service worker;
@@ -133,8 +133,8 @@ the pages can keep their absolute paths (`/src/…`, `/vendor/…`).
    - misses;
    - the simulator.
 
-   The Access page shows the agent commands and sport mode's setup; tokens,
-   people and following need the full server. Predictions are hidden.
+   The Access page shows the agent commands; tokens, people and following
+   need the full server. Predictions are hidden.
 4. **Caching.**
    - Data: the worker's PGlite is kept in IndexedDB (`idb://loopk-<hash of
      the address>`), with what its loader has loaded and its history
@@ -184,7 +184,6 @@ The full server keeps these in Postgres:
 
 - the loop settings entered for the simulator;
 - the AI Test profile;
-- sport mode;
 - report dashboards.
 
 The static server keeps each of them where it is used, and nothing goes to
@@ -192,7 +191,7 @@ Nightscout's settings collection, which only admin tokens may read:
 
 | Setting | Where it is kept | Who sees it |
 |---|---|---|
-| In the browser: loop settings, AI Test profile, sport mode, report dashboards, chart choices | `localStorage` | This browser only |
+| In the browser: loop settings, AI Test profile, report dashboards, chart choices | `localStorage` | This browser only |
 | In the agent: loop settings, AI Test profile | A JSON file on the agent's machine: `LOOPK_SETTINGS`, by default `~/.config/loopk/settings.json` | That agent only |
 
 **Not cookies.** The browser sends cookies with every request to the
@@ -211,19 +210,22 @@ file:
   `LOOPK_SETTINGS`, and the agent simulates with the person's loop settings.
   When it saves an AI Test profile, that profile is written to the file,
   which the browser can import.
-- The format is `{ version: 1, loopSettings, testProfiles, sport }`
+- The format is `{ version: 1, loopSettings, testProfiles }`
   (`settingsDocument` in `src/data/nightscout/settings.js`), what `GET
   /api/simulate/stored` returns. A newer version is refused, not misread;
-  an import is checked as the simulator reads it.
+  an import is checked as the simulator reads it. The `sport` of files
+  exported while loopk had sport mode is left out.
 - In code, both are `documentSettings({ load, save })` over the whole
   document. In the browser the worker keeps it for the page, which writes
   `localStorage` (other tabs hear of it); `src/mcp/settingsfile.js` reads
   and writes the agent's file.
-- Sport mode's configuration (percentage, duration, target) is kept in
-  `localStorage` like the rest. Switching it on writes a Profile Switch and
-  a Temporary Target to Nightscout's treatments, as on the full server
-  (`src/sport/mode.js`). That needs a token that may write treatments; with
-  a read token, the switch is hidden.
+- Copying the AI Test profile into a profile writes a profile document to
+  Nightscout, as on the full server (`copyTestProfile` in
+  `src/oref/testprofile.js`). That needs a token that may write profiles.
+- loopk had a sport mode (a profile percentage and a temp target, written
+  to Nightscout) until AAPS 4.0. AAPS's scenes do the same, and in its
+  hardened mode AAPS no longer takes either from Nightscout, so it was
+  removed.
 
 ### What the static server does not have
 
@@ -266,7 +268,7 @@ file:
 | Uploads from AAPS | To loopk | To Nightscout |
 | Where settings are kept | Postgres | The browser's `localStorage`; the agent's settings file |
 | Predictions | Yes | No |
-| Needs on Nightscout | Nothing (or following) | CORS; a read token, or a write token for sport mode |
+| Needs on Nightscout | Nothing (or following) | CORS; a read token, or one that may write profiles to copy one |
 
 ## Decisions
 

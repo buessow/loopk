@@ -437,7 +437,7 @@ async function run () {
 async function exportSettings () {
   try {
     const stored = await call('/api/simulate/stored');
-    const doc = { version: 1, loopSettings: stored.loopSettings ?? [], testProfiles: stored.testProfiles ?? {}, sport: stored.sport ?? null };
+    const doc = { version: 1, loopSettings: stored.loopSettings ?? [], testProfiles: stored.testProfiles ?? {} };
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2) + '\n'], { type: 'application/json' }));
     link.download = 'loopk-settings.json';

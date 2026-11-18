@@ -192,18 +192,20 @@ test('a collection the server does not have, as Nightscout has no heart rate, re
   }
 });
 
-test('sport mode switched in the browser writes its treatments to the server, which makes their identifiers', async () => {
+test('a profile copied in the browser is written to the server, which makes its identifier', async () => {
   const rw = await nightscoutSource({ url: s.url, token: writer.accessToken });
   const api = localApi(rw, { url: s.url, upstream: (path) => rw.loader.client.get(path) });
   try {
-    assert.equal((await api({ method: 'PUT', path: '/api/admin/sport', body: { percentage: 70, duration: 60, target: 140 } })).status, 200);
-    assert.equal((await api({ path: '/api/sport' })).body.canSwitch, true);
-    const started = await api({ method: 'POST', path: '/api/sport/start', body: { utcOffset: 60 } });
-    assert.equal(started.status, 200, JSON.stringify(started.body));
-    assert.equal(started.body.active, true);
-    const written = await s.ctx.data.collection('treatments').findMany({ filter: [{ field: 'device', operator: 'eq', value: 'loopk-sport' }], sort: { date: -1 }, limit: 5, onlyValid: true });
-    assert.deepEqual(written.map((t) => t.eventType).sort(), ['Profile Switch', 'Temporary Target']);
-    assert.ok(written.every((t) => t.identifier && t.enteredBy === `aaps@${new URL(s.url).host}`));
+    // the same as P, so later tests read the profile they expect
+    const flat = (v) => [[0, v]];
+    const test = { dia: 5, units: 'mg/dl', basal: flat(1), isf: flat(100), ic: flat(10), targetLow: flat(100), targetHigh: flat(110) };
+    assert.equal((await api({ method: 'PUT', path: '/api/simulate/test-profile', body: { profile: test } })).status, 200);
+    const copied = await api({ method: 'POST', path: '/api/simulate/test-profile/copy', body: { to: 'P', utcOffset: 60 } });
+    assert.equal(copied.status, 200, JSON.stringify(copied.body));
+    const written = await s.ctx.data.collection('profile').findOne(copied.body.identifier);
+    assert.ok(written.identifier);
+    assert.equal(written.enteredBy, `aaps@${new URL(s.url).host}`);
+    assert.equal(written.store.P.dia, 5);
   } finally {
     await rw.close();
   }

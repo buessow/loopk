@@ -368,7 +368,7 @@ export async function loopRuns (data, { from, to, units, timeZone, publicUrl, cu
 /** What the page's tiles show, and the state of the loop, now. */
 export async function status (ctx, { units, timeZone, now = Date.now() }) {
   const { data } = ctx;
-  const [readings, run, temp, target, hr, p, stats, sport, forecast] = await Promise.all([
+  const [readings, run, temp, target, hr, p, stats, forecast] = await Promise.all([
     data.glucose.latest(now, 2),
     data.loop.latest(now),
     data.treatments.latestTempBasal(now),
@@ -376,7 +376,6 @@ export async function status (ctx, { units, timeZone, now = Date.now() }) {
     data.heartrate.latest(now),
     profile(data, { at: now, units, timeZone }),
     statistics(data, { from: now - DAY, to: now, units, timeZone }),
-    ctx.sport?.state(now).catch(() => null),
     loopkForecast(ctx, units, timeZone).catch(() => null),
   ]);
   const [last, previous] = readings;
@@ -410,7 +409,6 @@ export async function status (ctx, { units, timeZone, now = Date.now() }) {
       ? { target: [glucose(targetMgdl(target.bottom), units), glucose(targetMgdl(target.top ?? target.bottom), units)], reason: target.reason, until: localTime(targetEnd, timeZone) }
       : null,
     profile: p.available === false ? null : { name: p.name, percentage: p.percentage, since: p.since },
-    sportMode: sport && sport.configured ? { active: sport.active, until: sport.active ? localTime(sport.until, timeZone) : null, percentage: sport.percentage, target: glucose(sport.target, units) } : null,
     heartRate: hr ? { bpm: hr.bpm, time: localTime(ms(hr.date), timeZone), minutesAgo: age(hr.date) } : null,
     loopkForecast: forecast,
     last24Hours: stats,

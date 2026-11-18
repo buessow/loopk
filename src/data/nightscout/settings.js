@@ -1,6 +1,6 @@
 // loopk's own settings where no loopk server keeps them: the loop settings
-// and AI Test profile entered for the simulator, and sport mode. They are one
-// document, { version, loopSettings, testProfiles, sport }, read and written
+// and AI Test profile entered for the simulator. They are one document,
+// { version, loopSettings, testProfiles }, read and written
 // whole (documentSettings): in the browser it is kept in localStorage
 // (public/localworker.js, through the page), for an agent's own MCP in a file
 // (src/mcp/settingsfile.js), otherwise in memory. "Export settings" writes
@@ -22,21 +22,24 @@ const FRESH = 60000;
 const notSettings = (why) => Object.assign(new Error(`These are not loopk settings: ${why}`), { status: 400, expose: true });
 const isObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 
-/** The settings document `value` checked for its shape: { version, loopSettings, testProfiles, sport }. */
+/**
+ * The settings document `value` checked for its shape: { version,
+ * loopSettings, testProfiles }. What else it has is left out, such as the
+ * sport mode of files exported before it was removed.
+ */
 export function settingsDocument (value) {
   if (!isObject(value)) throw notSettings('not a JSON object');
   const version = value.version ?? SETTINGS_VERSION;
   if (!Number.isInteger(version) || version < 1) throw notSettings('version must be a whole number');
   if (version > SETTINGS_VERSION) throw notSettings(`version ${version} is newer than this loopk reads (${SETTINGS_VERSION})`);
-  const { loopSettings = [], testProfiles = {}, sport = null } = value;
+  const { loopSettings = [], testProfiles = {} } = value;
   if (!Array.isArray(loopSettings) || !loopSettings.every((r) => isObject(r) && typeof r.setting === 'string' && Number.isFinite(r.validFrom))) {
     throw notSettings('loopSettings must be a list of { setting, value, validFrom }');
   }
   if (!isObject(testProfiles) || !Object.values(testProfiles).every((t) => isObject(t) && isObject(t.profile))) {
     throw notSettings('testProfiles must name objects with a profile');
   }
-  if (sport != null && !(isObject(sport) && isObject(sport.config))) throw notSettings('sport must be null or { config }');
-  return { version: SETTINGS_VERSION, loopSettings, testProfiles, sport };
+  return { version: SETTINGS_VERSION, loopSettings, testProfiles };
 }
 
 /**
@@ -143,19 +146,6 @@ function settingStores (get, put) {
       async remove (name) {
         const { [name]: _, ...rest } = await get('testProfiles') ?? {};
         await put('testProfiles', rest);
-      },
-    },
-
-    sport: {
-      async get () {
-        const r = await get('sport');
-        return r ? { ...r.config, updated_at: new Date(r.updatedAt), updated_by: r.by } : null;
-      },
-      async save ({ percentage, duration, target, profile, by }) {
-        await put('sport', { config: { percentage, duration, target, profile }, by: by ?? null, updatedAt: Date.now() });
-      },
-      async remove () {
-        await put('sport', null);
       },
     },
   };

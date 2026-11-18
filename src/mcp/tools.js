@@ -81,7 +81,7 @@ export function createMcpServer (ctx, { by = null } = {}) {
 
   tool('get_status', {
     title: 'Current status',
-    description: 'The present: latest glucose with trend and change, IOB, COB, the latest loop run (algorithm, eventual glucose, target, its reason), the running temp basal and temp target, the profile and percentage in effect, sport mode, heart rate, loopk\'s own glucose forecast if a model is set up, and the statistics of the last 24 hours (as get_statistics).',
+    description: 'The present: latest glucose with trend and change, IOB, COB, the latest loop run (algorithm, eventual glucose, target, its reason), the running temp basal and temp target, the profile and percentage in effect, heart rate, loopk\'s own glucose forecast if a model is set up, and the statistics of the last 24 hours (as get_statistics).',
     inputSchema: { units, timeZone },
   }, async (args) => data.status(ctx, await common(args)));
 

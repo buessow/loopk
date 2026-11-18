@@ -161,7 +161,7 @@ test('reading a Nightscout server directly, the agent keeps loopk\'s settings in
   const file = path.join(dir, 'loopk', 'settings.json');
   // loop settings exported from a browser
   await fs.mkdir(path.dirname(file));
-  await fs.writeFile(file, JSON.stringify({ version: 1, loopSettings: [{ setting: 'maxSMBBasalMinutes', value: 45, validFrom: t0 - 24 * HOUR }], testProfiles: {}, sport: null }));
+  await fs.writeFile(file, JSON.stringify({ version: 1, loopSettings: [{ setting: 'maxSMBBasalMinutes', value: 45, validFrom: t0 - 24 * HOUR }], testProfiles: {} }));
   const { client, call } = await agent({ NIGHTSCOUT_URL: s.url, NIGHTSCOUT_TOKEN: reader.accessToken, LOOPK_SETTINGS: file });
   try {
     assert.equal((await call('get_profile')).error, null);

@@ -13,8 +13,6 @@ import { ModelStore } from './predict/store.js';
 import { PredictionRecorder } from './predict/recorder.js';
 import { createReportRoutes } from './reports/routes.js';
 import { createAnalysisRoutes } from './analysis/routes.js';
-import { SportMode } from './sport/mode.js';
-import { createSportRoutes } from './sport/routes.js';
 import { createMcpRoutes } from './mcp/server.js';
 import { createSimulateRoutes } from './oref/routes.js';
 import { Following } from './sync/following.js';
@@ -24,9 +22,9 @@ import { latestPackage, mcpPackage } from './mcp/pack.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The parts of src/ the browser runs itself (public/localworker.js): the
-// data source over Nightscout, the simulator, the reports, misses and sport
-// mode, and Nightscout's permissions, which import nothing of Node's there.
-export const BROWSER_SOURCE = ['analysis', 'auth/permissions.js', 'data', 'oref', 'predict', 'reports', 'sport', 'sync'];
+// data source over Nightscout, the simulator, the reports and misses, and
+// Nightscout's permissions, which import nothing of Node's there.
+export const BROWSER_SOURCE = ['analysis', 'auth/permissions.js', 'data', 'oref', 'predict', 'reports', 'sync'];
 const browserSource = (file) => BROWSER_SOURCE.some((part) => file === part || file.startsWith(`${part}/`));
 
 export async function createContext (config, data) {
@@ -42,9 +40,6 @@ export async function createContext (config, data) {
   // The server starts the recorder, which predicts for each new reading.
   ctx.models = new ModelStore(data);
   ctx.predictions = new PredictionRecorder(ctx, ctx.models);
-  // Sport mode: a profile percentage and temp target sent to AAPS.
-  ctx.sport = new SportMode(ctx);
-  await ctx.sport.load();
   return ctx;
 }
 
@@ -70,7 +65,6 @@ export function createApp (ctx, { requestLog = false } = {}) {
   app.use('/api/reports', createReportRoutes(ctx));
   app.use('/api/analysis', createAnalysisRoutes(ctx));
   app.use('/api/simulate', createSimulateRoutes(ctx));
-  app.use(createSportRoutes(ctx));
   // For agents: read-only tools over the data (src/mcp/server.js).
   app.use('/mcp', createMcpRoutes(ctx));
   app.use('/api', (req, res, next) => (req.path.startsWith('/session') || req.path.startsWith('/admin') ? next() : res.status(404).json({ status: 404, message: 'Not found' })));

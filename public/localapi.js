@@ -1,10 +1,10 @@
 // loopk's API as the browser answers it itself (localworker.js), over a
 // data source on a Nightscout server: the session, the simulator (the
-// server's own src/oref/api.js), the reports, the loop's misses, sport mode,
-// loopk's settings and the Nightscout API v3, which goes to that server as
-// it is. loopk's settings are the person's own here (in this browser's
+// server's own src/oref/api.js), the reports, the loop's misses, loopk's
+// settings and the Nightscout API v3, which goes to that server as it is.
+// loopk's settings are the person's own here (in this browser's
 // localStorage), so whoever reads may change them; what goes to Nightscout
-// (sport mode, a profile copied) needs a token that may write there. A
+// (a profile copied) needs a token that may write there. A
 // request is { method, path, body }, its answer { status, body }. Without
 // the DOM, so it runs in a worker and in tests.
 
@@ -17,7 +17,6 @@ import { SimulationError } from '../src/oref/simulate.js';
 import { TEST_PROFILE, copyTestProfile, deleteTestProfile, saveTestProfile, validProfile } from '../src/oref/testprofile.js';
 import { hourlyTotals, validTimeZone } from '../src/reports/index.js';
 import { profileUsage } from '../src/reports/profiles.js';
-import { SportMode } from '../src/sport/mode.js';
 
 const DAY = 24 * 3600000;
 // The search for misses looks at most this far at once (as src/analysis/routes.js).
@@ -62,35 +61,23 @@ export function localApi (data, { url, upstream }) {
   const can = (permission) => hasPermission(permissions, permission);
   const simulate = simulateApi(data);
   const ctx = { data };
-  const sport = new SportMode(ctx);
-  // Settings that do not load leave sport mode not set up.
-  const loaded = sport.load().catch(() => {});
   const host = new URL(url).host;
   const user = { email: `${sub || 'token'}@${host}`, name: sub || host };
   const by = user.email;
   const utcOffset = (body) => (Number.isInteger(body.utcOffset) && Math.abs(body.utcOffset) <= 16 * 60 ? body.utcOffset : 0);
-  const switchSport = (fn) => async (body) => {
-    if (!can('api:treatments:create')) throw fail(403, `Switching sport mode needs a token that may write treatments on ${host}`);
-    await loaded;
-    return fn(body, { utcOffset: utcOffset(body), by });
-  };
 
   const routes = {
-    'GET /api/session': async () => {
-      await loaded;
-      return {
-        user,
-        // loopk's settings here are this browser's
-        isAdmin: true,
-        follow: null,
-        sport: sport.configured,
-        permissions,
-        // Answered by this browser: the data goes between it and the server only.
-        inBrowser: true,
-        nightscout: url,
-        predictions: false,
-      };
-    },
+    'GET /api/session': async () => ({
+      user,
+      // loopk's settings here are this browser's
+      isAdmin: true,
+      follow: null,
+      permissions,
+      // Answered by this browser: the data goes between it and the server only.
+      inBrowser: true,
+      nightscout: url,
+      predictions: false,
+    }),
 
     'POST /api/simulate/run': (body) => simulate.run(body),
     'POST /api/simulate/period': (body) => simulate.period(body),
@@ -112,7 +99,6 @@ export function localApi (data, { url, upstream }) {
     'GET /api/simulate/stored': () => data.settingsDocument.get(),
     'PUT /api/simulate/stored': async (body) => {
       await data.settingsDocument.put(importedSettings(body));
-      await sport.load();
       return data.settingsDocument.get();
     },
 
@@ -125,31 +111,6 @@ export function localApi (data, { url, upstream }) {
     },
     'GET /api/reports/hours': (body, query) => hourlyTotals(data, reportRange(query)),
     'GET /api/reports/profiles': (body, query) => profileUsage(data, reportRange(query)),
-
-    'GET /api/sport': async () => {
-      await loaded;
-      const canSwitch = can('api:treatments:create');
-      return { ...await sport.state(), canSwitch, following: null, ...(canSwitch ? {} : { why: `Switching sport mode needs a token that may write treatments on ${host}.` }) };
-    },
-    'POST /api/sport/start': switchSport(({ duration }, o) => sport.start({ ...o, duration })),
-    'POST /api/sport/stop': switchSport((body, o) => sport.stop(o)),
-    'GET /api/admin/sport': async () => {
-      await loaded;
-      return sport.view();
-    },
-    'PUT /api/admin/sport': async ({ percentage, duration = 0, target = null, profile = null }) => {
-      await loaded;
-      try {
-        await sport.configure({ percentage, duration, target, profile }, by);
-      } catch (err) {
-        throw fail(400, err.message);
-      }
-      return sport.view();
-    },
-    'DELETE /api/admin/sport': async () => {
-      await sport.remove();
-      return sport.view();
-    },
   };
 
   return async function handle ({ method = 'GET', path, body }) {

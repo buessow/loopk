@@ -70,8 +70,6 @@ export function createSessionRoutes (ctx) {
       user: { email: a.user.email, name: a.user.name, picture: a.user.picture },
       isAdmin: auth.can(a, MANAGE_ACCESS),
       follow: ctx.follower ? ctx.follower.status : null,
-      // Whether the Sport button shows: an admin set sport mode up.
-      sport: !!ctx.sport?.configured,
       permissions: a.permissions,
     });
   }));

@@ -1,6 +1,6 @@
 // loopk's own state in Postgres, beside the Nightscout records: access
-// (signing key, tokens, people), the server it follows, sport mode, the
-// loop settings and AI Test profile entered for the simulator, report
+// (signing key, tokens, people), the server it follows, the loop settings
+// and AI Test profile entered for the simulator, report
 // dashboards, and prediction models with what they predicted. Methods take
 // and return epoch milliseconds where they take times; rows come back as
 // the callers use them (src/data/index.js describes the interface).
@@ -73,21 +73,6 @@ export function stateStores (pool) {
           `INSERT INTO follow_state (collection, last_modified, source_url) VALUES ($1, $2, $3)
            ON CONFLICT (collection) DO UPDATE SET last_modified = EXCLUDED.last_modified, source_url = EXCLUDED.source_url, updated_at = now()`,
           [collection, lastModified, sourceUrl]);
-      },
-    },
-
-    // Sport mode's setting.
-    sport: {
-      get: () => one('SELECT * FROM sport_config'),
-      async save ({ percentage, duration, target, profile, by }) {
-        await pool.query(
-          `INSERT INTO sport_config (id, percentage, duration, target, profile, updated_by) VALUES (true, $1, $2, $3, $4, $5)
-           ON CONFLICT (id) DO UPDATE SET percentage = EXCLUDED.percentage, duration = EXCLUDED.duration, target = EXCLUDED.target,
-             profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-          [percentage, duration, target, profile, by || null]);
-      },
-      async remove () {
-        await pool.query('DELETE FROM sport_config');
       },
     },
 

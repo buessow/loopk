@@ -5,8 +5,8 @@
 // is not yet: time ranges of a collection, or, for "the latest before",
 // profile switches back from a time until the one it looks for. What is
 // loaded is refreshed with the server's history of changes at most once a
-// minute. The profile store is small and loaded whole. New documents (sport
-// mode, a copied profile) are written to the server; loopk's own API takes
+// minute. The profile store is small and loaded whole. New documents (a
+// copied profile) are written to the server; loopk's own API takes
 // none. loopk's settings are a document the caller keeps (settings.js: in
 // the browser's localStorage, in an agent's file); the rest of its own state
 // (tokens, people, dashboards) lives in memory only.
