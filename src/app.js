@@ -24,7 +24,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The parts of src/ the browser runs itself (public/localworker.js): the
 // data source over Nightscout, the simulator, the reports and misses, and
 // Nightscout's permissions, which import nothing of Node's there.
-export const BROWSER_SOURCE = ['analysis', 'auth/permissions.js', 'data', 'oref', 'predict', 'reports', 'sync'];
+export const BROWSER_SOURCE = ['analysis', 'auth/permissions.js', 'clientcontrol', 'data', 'oref', 'predict', 'reports', 'sync'];
 const browserSource = (file) => BROWSER_SOURCE.some((part) => file === part || file.startsWith(`${part}/`));
 
 export async function createContext (config, data) {

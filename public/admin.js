@@ -1,4 +1,5 @@
 import { localCredentials, request } from './local.js';
+import * as aaps from './aaps.js';
 import { setupTheme } from './theme.js';
 
 const $ = (id) => document.getElementById(id);
@@ -299,6 +300,55 @@ $('followRemove').addEventListener('click', async () => {
   } catch (err) { showError(err); }
 });
 
+// --- pairing with AAPS (client control, public/aaps.js) ---------------------
+
+async function renderAaps () {
+  const rec = aaps.pairing();
+  $('aapsForm').hidden = !!rec;
+  $('aapsPairedRow').hidden = !rec;
+  if (!rec) {
+    $('aapsStatus').innerHTML = await aaps.canPair()
+      ? '<span class="tag tag-neutral">Not paired</span> loopk copies profiles as a profile store, which AAPS takes only without client control.'
+      : '<span class="tag tag-warn">Not possible here</span> Pairing needs a passkey that can seal secrets (PRF), which this browser does not offer.';
+    return;
+  }
+  $('aapsStatus').innerHTML = '<span class="tag tag-accent">Paired</span> checking AAPS…';
+  const st = await aaps.status().catch((err) => ({ error: err.message }));
+  const role = st.role || rec.role;
+  const parts = [`<span class="tag tag-accent">Paired</span> as <span class="mono">${esc(rec.name || 'loopk')}</span>${role ? `, role ${esc(role)}` : ''}`];
+  if (st.error) parts.push(`<span class="tag tag-warn">Warning</span> ${esc(st.error)}`);
+  else {
+    if (st.listed === false) parts.push('<span class="tag tag-warn">Removed</span> AAPS no longer lists this browser as a client: unpair and pair again.');
+    if (role && role !== 'Admin') parts.push('<span class="tag tag-warn">Role</span> Copying profiles needs the Admin role.');
+    if (st.signedAt) parts.push(`AAPS’s settings signed ${since(st.signedAt)}${st.verified ? '' : ' (signature not checked yet)'}`);
+    if (st.lastAnswer) parts.push(`last answer from AAPS ${since(st.lastAnswer)}`);
+    if (!rec.replaced) parts.push('<span class="text-muted">The key exchange with AAPS has not finished; it is tried again with the next change.</span>');
+  }
+  $('aapsStatus').innerHTML = parts.join(' · ');
+}
+
+function wireAaps () {
+  $('aapsForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('aapsPair').disabled = true;
+    $('aapsStatus').innerHTML = '<span class="tag tag-accent">Pairing…</span> looking for the offer, then waiting for AAPS to answer (up to a minute).';
+    try {
+      await aaps.pair($('aapsPin').value);
+      $('aapsPin').value = '';
+    } catch (err) {
+      showError(err);
+    } finally {
+      $('aapsPair').disabled = false;
+    }
+    await renderAaps();
+  });
+  $('aapsUnpair').addEventListener('click', async () => {
+    if (!confirm('Unpair this browser from AAPS? Remove the client “loopk” in AAPS as well, which ends it there.')) return;
+    await aaps.unpair().catch(showError);
+    await renderAaps();
+  });
+}
+
 async function main () {
   const session = await call('GET', '/api/session');
   if (!session.isAdmin) {
@@ -310,9 +360,12 @@ async function main () {
     for (const id of ['tokensSection', 'usersSection', 'followSection', 'mcpWhereField', 'mcpServerText', 'mcpAgentText', 'mcpCreateRow']) $(id).hidden = true;
     $('mcpStaticText').hidden = false;
     showStaticMcpCommands();
+    wireAaps();
+    await renderAaps();
     return;
   }
-  await Promise.all([showMcpCommands(), loadTokens(), loadUsers(), loadFollow()]);
+  wireAaps();
+  await Promise.all([showMcpCommands(), loadTokens(), loadUsers(), loadFollow(), renderAaps()]);
 }
 
 setupTheme($('themeToggle'));

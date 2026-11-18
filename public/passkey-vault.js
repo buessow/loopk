@@ -72,24 +72,24 @@ export async function unlock (credentialId) {
   return { credentialId: b64url(cred.rawId), secret: new Uint8Array(first) };
 }
 
-/** The AES-GCM key derived from a PRF secret. */
-async function keyFrom (secret) {
+/** The AES-GCM key derived from a PRF secret; `info` keeps the keys of different uses apart. */
+async function keyFrom (secret, info = 'loopk token vault') {
   const base = await crypto.subtle.importKey('raw', secret, 'HKDF', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: encoder.encode('loopk token vault') },
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: encoder.encode(info) },
     base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
 }
 
 /** `text` encrypted with the PRF secret: { v, iv, data } (base64url). */
-export async function seal (secret, text) {
+export async function seal (secret, text, info) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await keyFrom(secret), encoder.encode(text));
+  const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await keyFrom(secret, info), encoder.encode(text));
   return { v: 1, iv: b64url(iv), data: b64url(data) };
 }
 
 /** The text of a sealed vault; throws if the secret is not the one it was sealed with. */
-export async function open (secret, sealed) {
-  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64url(sealed.iv) }, await keyFrom(secret), fromB64url(sealed.data));
+export async function open (secret, sealed, info) {
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64url(sealed.iv) }, await keyFrom(secret, info), fromB64url(sealed.data));
   return new TextDecoder().decode(plain);
 }
 

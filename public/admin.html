@@ -37,6 +37,17 @@
     </div>
   </section>
 
+  <section style="display:flex;flex-direction:column;gap:var(--space-3)" id="aapsSection">
+    <h3 style="margin:0">Pair with AAPS</h3>
+    <p class="text-muted" style="margin:0">AAPS 4.0 with client control takes changes only from clients it has paired with. Pair this browser to copy the AI Test profile into AAPS’s profiles on the Profiles page. In AAPS, add a client named “loopk” with the Admin role and enter the PIN it shows. The pairing is kept in this browser only, sealed with your passkey, which each change asks for; each browser pairs on its own.</p>
+    <div class="follow-status" id="aapsStatus"></div>
+    <form class="row" id="aapsForm">
+      <div class="field"><label for="aapsPin">PIN from AAPS</label><input class="input mono" id="aapsPin" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{8,9}" required placeholder="12345678"></div>
+      <button class="btn btn-primary" type="submit" id="aapsPair">Pair</button>
+    </form>
+    <div class="row" id="aapsPairedRow" hidden><button class="btn btn-ghost" type="button" id="aapsUnpair">Unpair</button></div>
+  </section>
+
   <section style="display:flex;flex-direction:column;gap:var(--space-3)" id="mcpSection">
     <h3 style="margin:0">Agents (MCP)</h3>
     <div class="field" id="mcpWhereField"><label>Where it runs</label><div class="seg"><label class="seg-opt"><input type="radio" name="mcpWhere" value="server" checked>On this server</label><label class="seg-opt"><input type="radio" name="mcpWhere" value="agent">In the agent</label></div></div>

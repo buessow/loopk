@@ -104,7 +104,7 @@ export async function newestStore (data) {
 }
 
 /** A schedule's glucose values from units `from` to units `to`, rounded as profiles are. */
-function convert (list, from, to) {
+export function convert (list, from, to) {
   if (isMmol(from) === isMmol(to)) return list;
   return isMmol(to)
     ? list.map(([s, v]) => [s, Math.round(v / MMOLL_TO_MGDL * 10) / 10])

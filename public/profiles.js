@@ -8,6 +8,7 @@ import { PERIODS, periodRange } from './reports-model.js';
 import { chartSeries, combinePcts, hourlyProfile, rowSummary } from './profiles-model.js';
 import { clearCache } from './browser-cache.js';
 import { request } from './local.js';
+import * as aaps from './aaps.js';
 import { setupTheme } from './theme.js';
 import { testDelta } from './testprofile-model.js';
 
@@ -316,6 +317,23 @@ function wireTestProfile () {
     try {
       if (copy) {
         const to = copy.dataset.copy;
+        if (aaps.pairing()) {
+          // Paired with AAPS (Access page): straight into its local profiles, signed.
+          if (!confirm(`Set the schedules of ${to} in AAPS to those of AI Test? If AAPS has no profile ${to}, it is added. DIA stays as set in AAPS. Your passkey signs the change.`)) return;
+          test.status = { key, text: 'Sending to AAPS…' };
+          renderTable();
+          const { adds, confirmed } = await aaps.copyProfile(test.view.profile, to);
+          test.status = {
+            key,
+            text: confirmed
+              ? `${adds ? 'Added' : 'Copied into'} ${to} in AAPS. Switch to ${to} on the phone to use it.`
+              : `AAPS took the change, but its settings here don't show ${to} as sent yet. Check the profile on the phone before switching to it.`,
+            warn: !confirmed,
+          };
+          await loadTestProfile();
+          renderTable();
+          return;
+        }
         const what = copy.dataset.adds === 'true' ? `Add ${to}, with the schedules and DIA of AI Test, to the profile store?` : `Replace the schedules and DIA of ${to} with those of AI Test?`;
         if (!confirm(`${what} This writes a new profile store, which AAPS receives.`)) return;
         await call('/api/simulate/test-profile/copy', { method: 'POST', body: { to, utcOffset: -new Date().getTimezoneOffset() } });
