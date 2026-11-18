@@ -290,7 +290,6 @@ export function defaultDashboard () {
       w('below', 'hour', 'bar', 6, 6, 6, 4),
       w('insulin', 'week', 'bar', 0, 10, 6, 4, { period: { preset: '90d' } }),
       w('carbs', 'day', 'bar', 6, 10, 6, 4),
-      w('tir', 'month', 'line', 0, 14, 12, 4, { period: { preset: '1y' } }),
     ],
   });
 }

@@ -121,6 +121,8 @@ test('a stored dashboard is cleaned up', () => {
   const standard = defaultDashboard();
   assert.ok(standard.widgets.length > 5);
   assert.deepEqual(normalizeDashboard(standard), standard);
+  // the first visit loads no more than the longest widget's 90 days
+  assert.ok(Date.now() - neededFrom(standard) <= 91 * 24 * 3600000);
   assert.equal(autoTitle({ metric: 'mean', group: 'hour', display: 'line' }), 'Mean glucose by hour of day');
   assert.equal(autoTitle({ metric: 'mean', group: 'hour', display: 'number' }), 'Mean glucose');
 });

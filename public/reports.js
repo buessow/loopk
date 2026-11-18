@@ -30,7 +30,8 @@ const PALETTE = ['--color-accent-700', '--color-accent-500', '--color-accent-300
 const state = {
   dashboard: null,
   inBrowser: false,
-  rows: [],
+  rows: null, // null: not loaded yet
+  loadFailed: false,
   loadedFrom: null,
   loadedAt: 0,
   editing: false,
@@ -107,8 +108,15 @@ async function ensureData (force = false) {
   if (!force && state.loadedFrom != null && from >= state.loadedFrom && fresh) return;
   setStatus('Loading…');
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const data = await call('GET', `/api/reports/hours?from=${Math.floor(from)}&to=${Date.now()}&tz=${encodeURIComponent(tz)}`);
+  let data;
+  try {
+    data = await call('GET', `/api/reports/hours?from=${Math.floor(from)}&to=${Date.now()}&tz=${encodeURIComponent(tz)}`);
+  } catch (err) {
+    state.loadFailed = !state.rows;
+    throw err;
+  }
   state.rows = hourRows(data);
+  state.loadFailed = false;
   state.loadedFrom = from;
   state.loadedAt = Date.now();
   setStatus('');
@@ -197,6 +205,11 @@ function renderWidget (w) {
   const body = el.querySelector('.widget-body');
   charts.get(w.id)?.destroy();
   charts.delete(w.id);
+  // The widgets are laid out before the data comes.
+  if (!state.rows) {
+    body.innerHTML = `<div class="widget-empty">${state.loadFailed ? 'Not loaded' : 'Loading…'}</div>`;
+    return;
+  }
 
   const range = periodRange(w.period || state.dashboard.period);
   const mgdl = state.units === 'mg/dL';
@@ -349,9 +362,9 @@ async function applyDialog () {
   } else {
     const [w] = normalizeDashboard({ widgets: [{ ...def, id: `w${Date.now().toString(36)}`, y: 1000, w: 6, h: 4 }] }).widgets;
     state.dashboard.widgets.push(w);
-    await ensureData();
     addToGrid(w, true);
     saveLayout();
+    await refresh();
   }
   scheduleSave();
 }
@@ -384,10 +397,11 @@ function renderControls () {
 async function refresh (force = false) {
   try {
     await ensureData(force);
-    renderAll();
   } catch (err) {
     setStatus(err.message, true);
   }
+  // Also after a failure: the data from before, or "Not loaded".
+  renderAll();
 }
 
 function setEditing (on) {
@@ -427,9 +441,9 @@ function wire () {
     if (!confirm('Replace your dashboard with the standard one?')) return;
     state.dashboard = defaultDashboard();
     renderControls();
-    await ensureData();
     buildGrid();
     scheduleSave();
+    await refresh();
   });
   $('grid').addEventListener('click', (e) => {
     const id = e.target.closest('.grid-stack-item')?.gridstackNode?.id;
@@ -484,12 +498,8 @@ async function main () {
   }
   renderControls();
   wire();
-  try {
-    await ensureData();
-  } catch (err) {
-    setStatus(err.message, true);
-  }
   buildGrid();
+  await refresh();
 }
 
 main().catch((err) => setStatus(err.message, true));
